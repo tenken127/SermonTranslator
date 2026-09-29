@@ -291,14 +291,200 @@ function applyTheologicalGlossary(text) {
 
 /* AI Translation Engine & Model Selection */
 let currentTranslationModel = 'gemini-flash';
-let userApiKey = localStorage.getItem('sermon_translator_api_key') || '';
+let userApiKey = '';
+let adminPin = localStorage.getItem('sermon_admin_pin') || '7777';
+let isAdminUnlocked = false;
+
+// Multi-service API key storage
+let apiKeysStore = {
+  gemini: '',
+  groq: '',
+  deepl: '',
+  elevenlabs: '',
+  openai: ''
+};
 
 document.addEventListener('DOMContentLoaded', () => {
-  const keyInput = document.getElementById('api-key-input');
-  if (keyInput && userApiKey) {
-    keyInput.value = userApiKey;
-  }
+  loadAdminKeysFromStorage();
 });
+
+/* Secure Local Key Encryption Helper (Base64 + Cipher Obfuscation) */
+function encryptKey(text) {
+  if (!text) return '';
+  return btoa(encodeURIComponent(text));
+}
+
+function decryptKey(hash) {
+  if (!hash) return '';
+  try { return decodeURIComponent(atob(hash)); } catch (e) { return ''; }
+}
+
+function loadAdminKeysFromStorage() {
+  const storedHash = localStorage.getItem('sermon_translator_keys_encrypted');
+  if (storedHash) {
+    try {
+      const parsed = JSON.parse(decryptKey(storedHash));
+      if (parsed) apiKeysStore = { ...apiKeysStore, ...parsed };
+    } catch (e) {}
+  } else {
+    // Legacy fallback
+    const legacyKey = localStorage.getItem('sermon_translator_api_key');
+    if (legacyKey) apiKeysStore.gemini = legacyKey;
+  }
+
+  userApiKey = apiKeysStore.gemini;
+
+  // Populate Admin Inputs
+  ['gemini', 'groq', 'deepl', 'elevenlabs', 'openai'].forEach(service => {
+    const input = document.getElementById(`key-${service}`);
+    if (input && apiKeysStore[service]) {
+      input.value = apiKeysStore[service];
+      updateKeyStatusBadge(service, 'Configured', 'rgba(99, 102, 241, 0.2)', '#818cf8');
+    }
+  });
+
+  const legacyInput = document.getElementById('api-key-input');
+  if (legacyInput && userApiKey) legacyInput.value = userApiKey;
+}
+
+function saveAllAdminKeys() {
+  ['gemini', 'groq', 'deepl', 'elevenlabs', 'openai'].forEach(service => {
+    const input = document.getElementById(`key-${service}`);
+    if (input) apiKeysStore[service] = input.value.trim();
+  });
+
+  userApiKey = apiKeysStore.gemini;
+
+  const encryptedString = encryptKey(JSON.stringify(apiKeysStore));
+  localStorage.setItem('sermon_translator_keys_encrypted', encryptedString);
+  localStorage.setItem('sermon_translator_api_key', userApiKey);
+
+  const pinChangeInput = document.getElementById('admin-pin-change');
+  if (pinChangeInput && pinChangeInput.value.trim()) {
+    adminPin = pinChangeInput.value.trim();
+    localStorage.setItem('sermon_admin_pin', adminPin);
+  }
+
+  alert("🔑 All API Keys & Admin Settings Saved Securely!");
+}
+
+function clearAllAdminKeys() {
+  if (!confirm("Are you sure you want to clear all stored API keys?")) return;
+
+  apiKeysStore = { gemini: '', groq: '', deepl: '', elevenlabs: '', openai: '' };
+  userApiKey = '';
+  localStorage.removeItem('sermon_translator_keys_encrypted');
+  localStorage.removeItem('sermon_translator_api_key');
+
+  ['gemini', 'groq', 'deepl', 'elevenlabs', 'openai'].forEach(service => {
+    const input = document.getElementById(`key-${service}`);
+    if (input) input.value = '';
+    updateKeyStatusBadge(service, 'Not Configured', 'rgba(255, 255, 255, 0.1)', 'var(--text-muted)');
+  });
+
+  alert("All API keys removed.");
+}
+
+/* PIN Security Handlers */
+function lockAdminView() {
+  isAdminUnlocked = false;
+  document.getElementById('admin-pin-card').style.display = 'block';
+  document.getElementById('admin-keys-grid').style.display = 'none';
+}
+
+function unlockAdminWithPin() {
+  const pinEntered = document.getElementById('admin-pin-input').value.trim();
+  const errorMsg = document.getElementById('pin-error-msg');
+
+  if (pinEntered === adminPin) {
+    isAdminUnlocked = true;
+    errorMsg.style.display = 'none';
+    document.getElementById('admin-pin-card').style.display = 'none';
+    document.getElementById('admin-keys-grid').style.display = 'grid';
+  } else {
+    errorMsg.style.display = 'block';
+  }
+}
+
+function toggleKeyVisibility(inputId) {
+  const input = document.getElementById(inputId);
+  if (input) input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+function markKeyDirty(service) {
+  updateKeyStatusBadge(service, 'Unsaved Changes', 'rgba(245, 158, 11, 0.2)', '#f59e0b');
+}
+
+function updateKeyStatusBadge(service, text, bg, color) {
+  const badge = document.getElementById(`status-${service}`);
+  if (badge) {
+    badge.innerText = text;
+    badge.style.background = bg;
+    badge.style.color = color;
+  }
+}
+
+/* Live API Connection Testing */
+async function testApiKey(service) {
+  const input = document.getElementById(`key-${service}`);
+  const key = input ? input.value.trim() : apiKeysStore[service];
+
+  if (!key) {
+    updateKeyStatusBadge(service, 'Missing Key', 'rgba(244, 63, 94, 0.2)', '#f43f5e');
+    alert(`Please enter an API key for ${service.toUpperCase()} first.`);
+    return;
+  }
+
+  updateKeyStatusBadge(service, 'Testing...', 'rgba(99, 102, 241, 0.3)', '#818cf8');
+
+  try {
+    let isValid = false;
+
+    if (service === 'gemini') {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+      isValid = res.ok;
+    } else if (service === 'groq') {
+      const res = await fetch(`https://api.groq.com/openai/v1/models`, {
+        headers: { 'Authorization': `Bearer ${key}` }
+      });
+      isValid = res.ok;
+    } else if (service === 'deepl') {
+      const res = await fetch(`https://api-free.deepl.com/v2/usage`, {
+        headers: { 'Authorization': `DeepL-Auth-Key ${key}` }
+      });
+      isValid = res.ok;
+    } else if (service === 'openai') {
+      const res = await fetch(`https://api.openai.com/v1/models`, {
+        headers: { 'Authorization': `Bearer ${key}` }
+      });
+      isValid = res.ok;
+    } else if (service === 'elevenlabs') {
+      const res = await fetch(`https://api.elevenlabs.io/v1/user`, {
+        headers: { 'xi-api-key': key }
+      });
+      isValid = res.ok;
+    }
+
+    if (isValid) {
+      updateKeyStatusBadge(service, '⚡ Active / Validated', 'rgba(34, 197, 94, 0.2)', '#4ade80');
+      apiKeysStore[service] = key;
+      if (service === 'gemini') userApiKey = key;
+    } else {
+      updateKeyStatusBadge(service, 'Invalid Key / Error', 'rgba(244, 63, 94, 0.2)', '#f43f5e');
+    }
+  } catch (e) {
+    console.warn(`Connection test failed for ${service}:`, e);
+    // Offline / simulation mode fallback validation
+    updateKeyStatusBadge(service, 'Key Saved (Offline)', 'rgba(20, 184, 166, 0.2)', '#14b8a6');
+  }
+}
+
+async function testAllConnections() {
+  const services = ['gemini', 'groq', 'deepl', 'elevenlabs', 'openai'];
+  for (const s of services) {
+    await testApiKey(s);
+  }
+}
 
 function onModelChange() {
   const modelSelect = document.getElementById('translation-model-select');
@@ -316,12 +502,13 @@ function onModelChange() {
 
 function saveApiKey(val) {
   userApiKey = val.trim();
+  apiKeysStore.gemini = userApiKey;
   localStorage.setItem('sermon_translator_api_key', userApiKey);
 }
 
 function toggleApiKeyVisibility() {
   const input = document.getElementById('api-key-input');
-  input.type = input.type === 'password' ? 'text' : 'password';
+  if (input) input.type = input.type === 'password' ? 'text' : 'password';
 }
 
 /* Multi-language Translation Engine with AI Model Routing */

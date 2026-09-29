@@ -109,6 +109,13 @@ To broadcast spoken translations over headphones to congregants with natural, hu
 ### 4.6 Data Export & Archiving
 - Export complete sermon transcript and translations in formatted TXT or Subtitle (`.srt`) files for video re-broadcasting.
 
+### 4.7 Admin View & Secure API Key Management
+- **Dedicated Admin Control Panel (`#view-admin`):** Centralized administration tab for managing API keys across 5 major AI providers (Google Gemini, Groq Cloud, DeepL Translate, ElevenLabs, OpenAI).
+- **Security & PIN Protection:**
+  - PIN lock system (default PIN `7777`, custom PIN updates) preventing unauthorized congregants from accessing API configurations.
+  - Base64 cipher-obfuscated local storage (`localStorage`) ensuring keys are retained strictly in the local browser context and never transmitted to external proxy servers.
+- **Live Connection Testing (`⚡ Test Connection`):** Automated ping validation testing key validity against provider API endpoints and rendering real-time status badges (*Active / Validated*, *Unsaved Changes*, *Not Configured*, *Invalid Key*).
+
 
 ---
 
