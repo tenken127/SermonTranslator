@@ -304,9 +304,75 @@ let apiKeysStore = {
   openai: ''
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   loadAdminKeysFromStorage();
+  await loadKeysFromLocalEnvFile();
+
+  // Support URL hash navigation (e.g. #listener or #admin)
+  const hash = window.location.hash.replace('#', '');
+  if (['speaker', 'listener', 'calculator', 'admin'].includes(hash)) {
+    switchView(hash);
+  }
 });
+
+/* Auto-load keys exclusively from .env when running on a local dev server */
+async function loadKeysFromLocalEnvFile() {
+  const envMap = {};
+
+  try {
+    if (window.location.protocol.startsWith('http')) {
+      const res = await fetch('/.env', { cache: 'no-store' });
+      if (res.ok) {
+        const envText = await res.text();
+        envText.split(/\r?\n/).forEach(line => {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) return;
+          const eqIdx = trimmed.indexOf('=');
+          if (eqIdx > 0) {
+            const k = trimmed.slice(0, eqIdx).trim();
+            const v = trimmed.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+            if (v) envMap[k] = v;
+          }
+        });
+      }
+    }
+  } catch (e) {
+    // Running without local .env file access; ignore silently
+  }
+
+  const mapping = {
+    GEMINI_API_KEY: 'gemini',
+    GROQ_API_KEY: 'groq',
+    DEEPL_API_KEY: 'deepl',
+    ELEVENLABS_API_KEY: 'elevenlabs',
+    OPENAI_API_KEY: 'openai'
+  };
+
+  let updated = false;
+  Object.entries(mapping).forEach(([envKey, service]) => {
+    if (envMap[envKey] && !apiKeysStore[service]) {
+      apiKeysStore[service] = envMap[envKey];
+      updated = true;
+    }
+  });
+
+  if (envMap.ADMIN_PIN && !localStorage.getItem('sermon_admin_pin')) {
+    adminPin = envMap.ADMIN_PIN;
+  }
+
+  if (updated || apiKeysStore.gemini) {
+    userApiKey = apiKeysStore.gemini;
+    ['gemini', 'groq', 'deepl', 'elevenlabs', 'openai'].forEach(service => {
+      const input = document.getElementById(`key-${service}`);
+      if (input && apiKeysStore[service]) {
+        input.value = apiKeysStore[service];
+        updateKeyStatusBadge(service, 'Loaded from .env', 'rgba(20, 184, 166, 0.2)', '#14b8a6');
+      }
+    });
+    const legacyInput = document.getElementById('api-key-input');
+    if (legacyInput && userApiKey) legacyInput.value = userApiKey;
+  }
+}
 
 /* Secure Local Key Encryption Helper (Base64 + Cipher Obfuscation) */
 function encryptKey(text) {
@@ -441,8 +507,38 @@ async function testApiKey(service) {
     let isValid = false;
 
     if (service === 'gemini') {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
-      isValid = res.ok;
+      const endpointsToProbe = [
+        {
+          name: 'Gemini AI Studio TTS',
+          url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(key)}`,
+          options: {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: 'Say: Ready.' }] }],
+              generationConfig: {
+                responseModalities: ['AUDIO'],
+                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } }
+              }
+            })
+          }
+        },
+        {
+          name: 'Gemini AI Studio Models',
+          url: `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
+          options: { method: 'GET' }
+        }
+      ];
+
+      for (const probe of endpointsToProbe) {
+        try {
+          const res = await fetch(probe.url, probe.options);
+          if (res.ok) {
+            isValid = true;
+            break;
+          }
+        } catch (err) {}
+      }
     } else if (service === 'groq') {
       const res = await fetch(`https://api.groq.com/openai/v1/models`, {
         headers: { 'Authorization': `Bearer ${key}` }
@@ -547,24 +643,35 @@ async function translateTextWithAI(text, targetLang, model) {
   
   // 1. Live Gemini REST API Integration if key provided
   if (model === 'gemini-flash' && apiKey) {
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `You are an expert theological sermon translator. Translate the following spoken sermon phrase into target language code "${targetLang}". Preserve biblical names, scripture citations, and homiletic dignity. Return ONLY the translated sentence.\n\nSermon text: "${text}"`
+    const promptText = `You are an expert theological sermon translator. Translate the following spoken sermon phrase into target language code "${targetLang}". Preserve biblical names, scripture citations, and homiletic dignity. Return ONLY the translated sentence.\n\nSermon text: "${text}"`;
+    const endpoints = [
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              role: 'user',
+              parts: [{ text: promptText }]
             }]
-          }]
-        })
-      });
-      const data = await response.json();
-      const aiResult = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (aiResult) return aiResult.trim();
-    } catch (e) {
-      console.warn("Gemini API call failed, falling back to theological AI model prompt simulation:", e);
+          })
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const aiResult = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (aiResult) return aiResult.trim();
+        }
+      } catch (e) {
+        console.warn(`Gemini translation call failed for ${url}:`, e);
+      }
     }
+    console.warn("All Gemini model endpoints failed, falling back to theological AI model prompt simulation.");
   }
 
   // 2. DeepL API Integration if key provided
@@ -703,11 +810,18 @@ function appendTranslationToListener(text, lang) {
 
 /* Web Speech & Realtime Accent Synthesis (TTS for Listeners) */
 let selectedVoiceModel = 'gemini-live';
+let activeAudioElement = null;
 
 function onVoiceModelChange(modelName) {
   selectedVoiceModel = modelName;
   if (isTTSAudioActive) {
-    speakTextTTS(`Switched to ${modelName === 'gemini-live' ? 'Gemini Live Realtime Voice' : modelName === 'elevenlabs-accent' ? 'ElevenLabs Spanish Accent' : 'Native Browser Voice'}.`, 'en');
+    const labelMap = {
+      'gemini-live': 'Google Gemini and Cloud TTS API',
+      'gcloud-neural': 'Google Cloud Neural2 TTS API',
+      'elevenlabs-accent': 'ElevenLabs Spanish Accent',
+      'browser-native': 'Native Browser Voice'
+    };
+    speakTextTTS(`Switched to ${labelMap[modelName] || 'Selected Voice'}.`, 'en');
   }
 }
 
@@ -719,36 +833,318 @@ function toggleTTSAudio() {
   if (isTTSAudioActive) {
     pill.classList.add('active');
     label.innerText = "Headphone Audio: ON 🎧";
-    speakTextTTS("Headphone audio translation enabled.", "en");
+    speakTextTTS("Headphone audio translation enabled.", currentTargetLang || "en");
   } else {
     pill.classList.remove('active');
     label.innerText = "Headphone Audio: OFF";
     if (window.speechSynthesis) window.speechSynthesis.cancel();
+    if (activeAudioElement) {
+      activeAudioElement.pause();
+    }
   }
 }
 
-function speakTextTTS(text, langCode) {
+/* Convert 16-bit Linear PCM (24kHz mono from Gemini TTS) into a playable WAV Blob URL */
+function pcm16Base64ToWavUrl(base64Pcm, sampleRate = 24000) {
+  const binaryStr = atob(base64Pcm);
+  const pcmLen = binaryStr.length;
+  const wavBuffer = new ArrayBuffer(44 + pcmLen);
+  const view = new DataView(wavBuffer);
+
+  const writeStr = (offset, str) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + pcmLen, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);          // Subchunk1Size (16 for PCM)
+  view.setUint16(20, 1, true);           // AudioFormat (1 = Linear PCM)
+  view.setUint16(22, 1, true);           // NumChannels (1 = Mono)
+  view.setUint32(24, sampleRate, true);   // SampleRate
+  view.setUint32(28, sampleRate * 2, true); // ByteRate (SampleRate * NumChannels * BitsPerSample/8)
+  view.setUint16(32, 2, true);           // BlockAlign
+  view.setUint16(34, 16, true);          // BitsPerSample
+  writeStr(36, 'data');
+  view.setUint32(40, pcmLen, true);
+
+  const uint8 = new Uint8Array(wavBuffer, 44);
+  for (let i = 0; i < pcmLen; i++) {
+    uint8[i] = binaryStr.charCodeAt(i);
+  }
+
+  const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+  return URL.createObjectURL(blob);
+}
+
+/* Update TTS Status Badges in Audience View & Admin View */
+function updateTTSStatusUI(badgeText, badgeBg, badgeColor, detailText, audioUrl) {
+  const badge = document.getElementById('tts-live-badge');
+  if (badge) {
+    badge.innerText = badgeText;
+    badge.style.background = badgeBg;
+    badge.style.color = badgeColor;
+  }
+
+  const latencyLabel = document.getElementById('tts-latency-label');
+  if (latencyLabel && detailText !== undefined) {
+    latencyLabel.innerText = detailText;
+  }
+
+  const adminStatus = document.getElementById('admin-tts-test-status');
+  if (adminStatus && detailText) {
+    adminStatus.style.display = 'block';
+    adminStatus.innerText = `${badgeText} — ${detailText}`;
+    adminStatus.style.color = badgeColor;
+  }
+
+  const player = document.getElementById('tts-audio-player');
+  if (player && audioUrl) {
+    player.style.display = 'inline-block';
+    player.src = audioUrl;
+    activeAudioElement = player;
+    player.play().catch(err => console.warn("Audio autoplay blocked:", err));
+  }
+}
+
+/* Synthesize speech using Google Gemini TTS API or Google Cloud Text-to-Speech API */
+async function synthesizeWithGoogleTTS(text, langCode, apiKey, preferCloudNeural = false) {
+  const personaSelect = document.getElementById('tts-voice-persona');
+  const voicePersona = personaSelect ? personaSelect.value : 'Kore';
+
+  const bcp47Map = {
+    en: 'en-US', es: 'es-US', pt: 'pt-BR', fr: 'fr-FR',
+    ht: 'fr-FR', ko: 'ko-KR', tl: 'fil-PH', zh: 'cmn-CN',
+    vi: 'vi-VN', ru: 'ru-RU'
+  };
+  const bcp47Lang = bcp47Map[langCode] || 'en-US';
+
+  const cloudVoiceMap = {
+    'en-US': 'en-US-Neural2-D',
+    'es-US': 'es-US-Neural2-B',
+    'pt-BR': 'pt-BR-Neural2-B',
+    'fr-FR': 'fr-FR-Neural2-B',
+    'ko-KR': 'ko-KR-Neural2-C',
+    'fil-PH': 'fil-PH-Neural2-D',
+    'cmn-CN': 'cmn-CN-Wavenet-B',
+    'vi-VN': 'vi-VN-Neural2-D',
+    'ru-RU': 'ru-RU-Wavenet-B'
+  };
+
+  let lastErrorMessage = '';
+
+  // Helper 1: Try Google Cloud Text-to-Speech v1 REST API
+  const tryCloudTTS = async () => {
+    const res = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: { text },
+        voice: {
+          languageCode: bcp47Lang,
+          name: cloudVoiceMap[bcp47Lang] || undefined
+        },
+        audioConfig: {
+          audioEncoding: 'MP3',
+          speakingRate: 1.0,
+          pitch: 0.0
+        }
+      })
+    });
+    const data = await res.json();
+    if (res.ok && data.audioContent) {
+      return {
+        audioUrl: `data:audio/mp3;base64,${data.audioContent}`,
+        provider: `Google Cloud TTS (${cloudVoiceMap[bcp47Lang] || bcp47Lang})`
+      };
+    }
+    lastErrorMessage = data.error?.message || `Cloud TTS HTTP ${res.status}`;
+    return null;
+  };
+
+  // Helper 2: Try Gemini 2.5 Flash Preview TTS API (verified HTTP 200 on generativelanguage.googleapis.com)
+  const tryGeminiTTS = async () => {
+    const ttsEndpoints = [
+      {
+        label: `Gemini 2.5 Flash TTS (${voicePersona})`,
+        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(apiKey)}`
+      },
+      {
+        label: `Gemini 2.5 Pro TTS (${voicePersona})`,
+        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-tts:generateContent?key=${encodeURIComponent(apiKey)}`
+      }
+    ];
+
+    for (const ep of ttsEndpoints) {
+      try {
+        const res = await fetch(ep.url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{ text: `Say clearly and reverently: ${text}` }]
+            }],
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: voicePersona
+                  }
+                }
+              }
+            }
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const inlineData = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
+          if (inlineData?.data) {
+            const mime = inlineData.mimeType || '';
+            const audioUrl = (mime.includes('L16') || mime.includes('pcm') || !mime.includes('mp3'))
+              ? pcm16Base64ToWavUrl(inlineData.data, 24000)
+              : `data:${mime};base64,${inlineData.data}`;
+            return { audioUrl, provider: ep.label };
+          }
+        } else {
+          lastErrorMessage = data.error?.message || `Gemini TTS HTTP ${res.status}`;
+        }
+      } catch (err) {
+        lastErrorMessage = err.message;
+      }
+    }
+    return null;
+  };
+
+  if (preferCloudNeural) {
+    const cloudRes = await tryCloudTTS();
+    if (cloudRes) return cloudRes;
+    const geminiRes = await tryGeminiTTS();
+    if (geminiRes) return geminiRes;
+  } else {
+    const geminiRes = await tryGeminiTTS();
+    if (geminiRes) return geminiRes;
+    const cloudRes = await tryCloudTTS();
+    if (cloudRes) return cloudRes;
+  }
+
+  throw new Error(lastErrorMessage || 'Google TTS API call failed');
+}
+
+/* Interactive Live TTS API Test Handler (for Audience View & Admin Tab) */
+async function runLiveTTSTest(source = 'listener') {
+  const customInput = document.getElementById('listener-tts-custom-text');
+  const sampleText = (customInput && customInput.value.trim())
+    ? customInput.value.trim()
+    : "The Lord is my shepherd; I shall not want. Grace and peace be with you all.";
+
+  // Ensure latest key from Admin input is synced if user typed it there
+  const adminGeminiInput = document.getElementById('key-gemini');
+  if (adminGeminiInput && adminGeminiInput.value.trim()) {
+    apiKeysStore.gemini = adminGeminiInput.value.trim();
+    userApiKey = apiKeysStore.gemini;
+  }
+
+  await speakTextTTS(sampleText, currentTargetLang || 'en', true);
+}
+
+async function speakTextTTS(text, langCode, forceApiTest = false) {
+  const startTime = performance.now();
+  const targetLang = langCode || currentTargetLang || 'en';
+  const geminiKey = apiKeysStore.gemini || userApiKey;
+  const elevenKey = apiKeysStore.elevenlabs;
+
+  // 1. Live Google Gemini / Cloud TTS API Synthesis
+  if ((selectedVoiceModel === 'gemini-live' || selectedVoiceModel === 'gcloud-neural' || forceApiTest) && selectedVoiceModel !== 'browser-native' && selectedVoiceModel !== 'elevenlabs-accent') {
+    if (geminiKey) {
+      updateTTSStatusUI('Synthesizing TTS...', 'rgba(99, 102, 241, 0.3)', '#818cf8', 'Calling Google TTS API...');
+      try {
+        const result = await synthesizeWithGoogleTTS(text, targetLang, geminiKey, selectedVoiceModel === 'gcloud-neural');
+        const elapsedMs = Math.round(performance.now() - startTime);
+        updateTTSStatusUI(
+          '⚡ Live API Audio',
+          'rgba(34, 197, 94, 0.2)',
+          '#4ade80',
+          `${result.provider} • ${elapsedMs}ms`,
+          result.audioUrl
+        );
+        return;
+      } catch (err) {
+        console.warn("Google TTS API error, falling back to browser speech synthesis:", err);
+        updateTTSStatusUI(
+          '⚠️ API Fallback (Browser TTS)',
+          'rgba(245, 158, 11, 0.2)',
+          '#f59e0b',
+          `${err.message.slice(0, 90)}`
+        );
+      }
+    } else if (forceApiTest) {
+      updateTTSStatusUI(
+        'Missing Gemini Key (Browser Fallback)',
+        'rgba(245, 158, 11, 0.2)',
+        '#f59e0b',
+        'Add GEMINI_API_KEY in Admin Settings or .env'
+      );
+    }
+  }
+
+  // 2. Live ElevenLabs TTS API Synthesis if selected & configured
+  if (selectedVoiceModel === 'elevenlabs-accent' && elevenKey) {
+    updateTTSStatusUI('Synthesizing ElevenLabs...', 'rgba(99, 102, 241, 0.3)', '#818cf8', 'Calling ElevenLabs API...');
+    try {
+      const res = await fetch('https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM', {
+        method: 'POST',
+        headers: {
+          'xi-api-key': elevenKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_multilingual_v2'
+        })
+      });
+      if (res.ok) {
+        const audioBlob = await res.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const elapsedMs = Math.round(performance.now() - startTime);
+        updateTTSStatusUI(
+          '⚡ ElevenLabs Live Audio',
+          'rgba(34, 197, 94, 0.2)',
+          '#4ade80',
+          `ElevenLabs Multilingual v2 • ${elapsedMs}ms`,
+          audioUrl
+        );
+        return;
+      }
+    } catch (err) {
+      console.warn("ElevenLabs TTS call failed, falling back to browser TTS:", err);
+    }
+  }
+
+  // 3. Native Browser Web Speech Synthesis Fallback
   if (!('speechSynthesis' in window)) return;
 
   window.speechSynthesis.cancel(); // cancel pending speech
   const utterance = new SpeechSynthesisUtterance(text);
-  
-  // Apply accent / voice persona tuning
-  if (selectedVoiceModel === 'gemini-live') {
-    utterance.pitch = 1.05; // Expressive natural pitch
-    utterance.rate = 1.0;
-  } else if (selectedVoiceModel === 'elevenlabs-accent') {
-    utterance.pitch = 0.95; // Warm pastoral cadence
-    utterance.rate = 0.95;
-  } else {
-    utterance.pitch = 1.0;
-    utterance.rate = 1.0;
-  }
+  const personaSelect = document.getElementById('tts-voice-persona');
+  const voicePersona = personaSelect ? personaSelect.value : 'Kore';
 
-  // Attempt to select best matching system voice
+  // Apply accent / voice persona tuning for native fallback
+  const personaTuning = {
+    Kore: { pitch: 1.0, rate: 0.96 },
+    Charon: { pitch: 0.85, rate: 0.92 },
+    Puck: { pitch: 1.08, rate: 1.02 },
+    Aoede: { pitch: 1.04, rate: 0.98 },
+    Fenrir: { pitch: 0.9, rate: 1.0 }
+  };
+  const tuning = personaTuning[voicePersona] || { pitch: 1.0, rate: 1.0 };
+  utterance.pitch = tuning.pitch;
+  utterance.rate = tuning.rate;
+
   const voices = window.speechSynthesis.getVoices();
-  const targetLang = langCode || 'en';
-  
   const preferredVoice = voices.find(v => v.lang.startsWith(targetLang) && (v.name.includes('Natural') || v.name.includes('Enhanced') || v.name.includes('Google') || v.name.includes('Siri'))) ||
                          voices.find(v => v.lang.startsWith(targetLang));
 
@@ -758,6 +1154,16 @@ function speakTextTTS(text, langCode) {
 
   utterance.lang = targetLang === 'en' ? 'en-US' : targetLang;
   window.speechSynthesis.speak(utterance);
+
+  if (selectedVoiceModel === 'browser-native') {
+    const elapsedMs = Math.round(performance.now() - startTime);
+    updateTTSStatusUI(
+      '🔊 Browser Native TTS',
+      'rgba(20, 184, 166, 0.2)',
+      '#14b8a6',
+      `${preferredVoice ? preferredVoice.name : utterance.lang} • ${elapsedMs}ms`
+    );
+  }
 }
 
 /* Primary Target & Listener Language Handlers */
