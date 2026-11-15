@@ -1,5 +1,99 @@
 /* Sermon Translator App Logic */
 
+// Node.js Local Dev Server Bootstrap (runs when executed via `node app.js` or IDE Run button)
+if (typeof window === 'undefined' && typeof require === 'function') {
+  const http = require('http');
+  const fs = require('fs');
+  const path = require('path');
+  const { exec } = require('child_process');
+
+  const PORT = Number(process.env.PORT) || 8080;
+  const ROOT = __dirname;
+  const MIME_TYPES = {
+    '.html': 'text/html; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.js': 'application/javascript; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.ico': 'image/x-icon',
+    '.env': 'text/plain; charset=utf-8'
+  };
+
+  const server = http.createServer((req, res) => {
+    const reqUrl = (req.url || '/').split('?')[0];
+    const relPath = reqUrl === '/' ? '/index.html' : decodeURIComponent(reqUrl);
+    const safePath = path.normalize(path.join(ROOT, relPath));
+
+    if (!safePath.startsWith(ROOT)) {
+      res.writeHead(403);
+      return res.end('Forbidden');
+    }
+
+    fs.readFile(safePath, (err, data) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Not Found');
+      }
+      const ext = path.extname(safePath) || (path.basename(safePath) === '.env' ? '.env' : '');
+      res.writeHead(200, {
+        'Content-Type': MIME_TYPES[ext] || 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-cache'
+      });
+      res.end(data);
+    });
+  });
+
+  let currentPort = PORT;
+  const maxPort = PORT + 20;
+
+  const openBrowser = (url) => {
+    if (process.env.NO_OPEN) return;
+    const openCmd = process.platform === 'darwin' ? `open "${url}"` : process.platform === 'win32' ? `start "" "${url}"` : `xdg-open "${url}"`;
+    exec(openCmd);
+  };
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      const checkReq = http.get(`http://127.0.0.1:${currentPort}/index.html`, (res) => {
+        let body = '';
+        res.on('data', chunk => { body += chunk; });
+        res.on('end', () => {
+          if (res.statusCode === 200 && body.includes('SermonTranslator')) {
+            const url = `http://localhost:${currentPort}`;
+            console.log(`SermonTranslator server already running at ${url}`);
+            openBrowser(url);
+            process.exit(0);
+          } else if (currentPort < maxPort) {
+            currentPort += 1;
+            server.listen(currentPort, '127.0.0.1');
+          } else {
+            console.error(`Ports ${PORT}-${maxPort} are all in use.`);
+            process.exit(1);
+          }
+        });
+      });
+      checkReq.on('error', () => {
+        if (currentPort < maxPort) {
+          currentPort += 1;
+          server.listen(currentPort, '127.0.0.1');
+        } else {
+          console.error(`Ports ${PORT}-${maxPort} are all in use.`);
+          process.exit(1);
+        }
+      });
+    } else {
+      console.error('Server error:', err);
+    }
+  });
+
+  server.listen(currentPort, '127.0.0.1', () => {
+    const url = `http://localhost:${currentPort}`;
+    console.log(`SermonTranslator server running at ${url}`);
+    openBrowser(url);
+  });
+}
+
 // Global State
 let isMicrophoneActive = false;
 let recognition = null;
@@ -8,13 +102,58 @@ let analyser = null;
 let microphoneStream = null;
 let animationFrameId = null;
 
-let isTTSAudioActive = false;
-let currentFontSize = 1.75; // rem
+let isTTSAudioActive = true;
+let isAudienceMuted = false;
+let audienceVolume = 1.0;
+let currentActiveView = 'speaker';
+let currentFontSize = 1.35; // rem
 let currentTheme = 'dark';
 let currentTargetLang = 'en';
 
 let roomCode = "GRACE-" + Math.floor(100 + Math.random() * 900);
 let transcriptHistory = [];
+const translationCache = new Map();
+
+const LANGUAGE_NAME_MAP = {
+  en: 'English',
+  es: 'Spanish',
+  pt: 'Portuguese',
+  fr: 'French',
+  ht: 'Haitian Creole',
+  ko: 'Korean',
+  tl: 'Tagalog',
+  zh: 'Chinese',
+  vi: 'Vietnamese',
+  ru: 'Russian'
+};
+
+const BCP47_LANG_MAP = {
+  en: 'en-US',
+  es: 'es-US',
+  pt: 'pt-BR',
+  fr: 'fr-FR',
+  ht: 'fr-FR',
+  ko: 'ko-KR',
+  tl: 'fil-PH',
+  zh: 'zh-CN',
+  vi: 'vi-VN',
+  ru: 'ru-RU'
+};
+
+const FLAG_MAP = {
+  en: '🇺🇸', es: '🇲🇽', pt: '🇧🇷', fr: '🇫🇷', ht: '🇭🇹',
+  ko: '🇰🇷', tl: '🇵🇭', zh: '🇨🇳', vi: '🇻🇳', ru: '🇷🇺'
+};
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 4000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Broadcast Channel for syncing tabs in real-time
 const broadcastChannel = typeof BroadcastChannel !== 'undefined' 
@@ -62,41 +201,86 @@ const sampleSermonPhrases = [
 let demoPhraseIndex = 0;
 
 // Initialization on DOM Ready
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('room-code-display').innerText = roomCode;
-  generateSimulatedQRCode();
-  initSpeechRecognition();
-  calculateCost();
-  drawEmptyVisualizer();
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.documentElement.style.setProperty('--subtitle-font-size', `${currentFontSize}rem`);
+    document.addEventListener('click', unlockAudioPlayback, { once: true });
+    document.getElementById('room-code-display').innerText = roomCode;
+    generateSimulatedQRCode();
+    initSpeechRecognition();
+    calculateCost();
+    drawEmptyVisualizer();
 
-  // Listen for broadcast messages across browser tabs
-  if (broadcastChannel) {
-    broadcastChannel.onmessage = (event) => {
-      const data = event.data;
-      if (data && data.type === 'NEW_TRANSLATION') {
-        appendTranslationToListener(data.translatedText, data.language);
-      }
-    };
-  }
-
-  // Also listen on localStorage for fallback tab sync
-  window.addEventListener('storage', (e) => {
-    if (e.key === 'sermon_latest_translation' && e.newValue) {
-      try {
-        const data = JSON.parse(e.newValue);
-        appendTranslationToListener(data.translatedText, data.language);
-      } catch (err) {}
+    // Listen for broadcast messages across browser tabs
+    if (broadcastChannel) {
+      broadcastChannel.onmessage = (event) => {
+        const data = event.data;
+        if (data && data.type === 'NEW_TRANSLATION') {
+          appendTranslationToListener(data.translatedText, data.language, data.originalText, data.timestamp, data.model);
+        }
+      };
     }
+
+    // Also listen on localStorage for fallback tab sync
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'sermon_latest_translation' && e.newValue) {
+        try {
+          const data = JSON.parse(e.newValue);
+          appendTranslationToListener(data.translatedText, data.language, data.originalText, data.timestamp, data.model);
+        } catch (err) {}
+      }
+    });
+
+    // Restore saved Audience View volume
+    try {
+      const savedVol = localStorage.getItem('sermon_audience_volume');
+      if (savedVol !== null) {
+        const parsed = Math.max(0, Math.min(1, parseFloat(savedVol)));
+        if (!Number.isNaN(parsed)) {
+          audienceVolume = parsed;
+          const slider = document.getElementById('audience-volume-slider');
+          const volLabel = document.getElementById('audience-volume-label');
+          if (slider) slider.value = Math.round(audienceVolume * 100);
+          if (volLabel) volLabel.innerText = `${Math.round(audienceVolume * 100)}%`;
+        }
+      }
+    } catch (err) {}
+
+    // Hydrate Audience View with recent translations if opening or navigating to Audience View
+    try {
+      const savedHistory = JSON.parse(localStorage.getItem('sermon_transcript_history') || '[]');
+      if (Array.isArray(savedHistory) && savedHistory.length > 0) {
+        savedHistory.forEach(item => {
+          appendTranslationToListener(item.translatedText, item.language, item.originalText, item.timestamp, item.model, true);
+        });
+      }
+    } catch (err) {}
   });
-});
+}
 
 /* View Navigation */
 function switchView(viewName) {
+  const targetView = viewName === 'calculator' ? 'admin' : viewName;
+  const tabEl = document.getElementById(`tab-${targetView}`);
+  const viewEl = document.getElementById(`view-${targetView}`);
+  if (!tabEl || !viewEl) return;
+
+  currentActiveView = targetView;
+
+  // Audio translation should only be heard in Audience View
+  if (targetView !== 'listener') {
+    stopAllTTSPlayback();
+  }
+
   document.querySelectorAll('.nav-tabs .tab-btn').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.view-section').forEach(sec => sec.classList.remove('active'));
 
-  document.getElementById(`tab-${viewName}`).classList.add('active');
-  document.getElementById(`view-${viewName}`).classList.add('active');
+  tabEl.classList.add('active');
+  viewEl.classList.add('active');
+
+  if (typeof history !== 'undefined' && history.replaceState) {
+    try { history.replaceState(null, '', `#${targetView}`); } catch (e) {}
+  }
 }
 
 /* Microphone & Web Speech API Initialization */
@@ -146,14 +330,19 @@ function initSpeechRecognition() {
 
   recognition.onerror = (event) => {
     console.error("Speech recognition error:", event.error);
-    if (event.error === 'no-speech') return;
+    // Do not stop live translation on transient errors (e.g. silence or view/tab focus changes)
+    if (event.error === 'no-speech' || event.error === 'aborted') return;
     stopMicrophone();
   };
 
   recognition.onend = () => {
     if (isMicrophoneActive) {
-      // Auto restart if still active
-      try { recognition.start(); } catch (e) {}
+      // Auto restart with a short delay so browser speech engine never throws InvalidStateError
+      setTimeout(() => {
+        if (isMicrophoneActive && recognition) {
+          try { recognition.start(); } catch (e) {}
+        }
+      }, 150);
     } else {
       updateMicUI(false);
     }
@@ -275,7 +464,8 @@ function drawEmptyVisualizer() {
 
 /* Theological Dictionary / Custom Glossary Filter */
 function applyTheologicalGlossary(text) {
-  const glossaryRaw = document.getElementById('glossary-input').value;
+  const glossaryInput = document.getElementById('glossary-input');
+  const glossaryRaw = glossaryInput ? glossaryInput.value : '';
   if (!glossaryRaw) return text;
 
   const terms = glossaryRaw.split(',').map(t => t.trim()).filter(Boolean);
@@ -289,10 +479,19 @@ function applyTheologicalGlossary(text) {
   return processedText;
 }
 
+const DEFAULT_TRANSLATION_PROMPT = 'You are an expert theological sermon translator. Preserve biblical names, scripture citations, and homiletic dignity. Return ONLY the translated sentence.';
+
+function resetTranslationPrompt() {
+  const promptInput = document.getElementById('translation-prompt-input');
+  if (promptInput) {
+    promptInput.value = DEFAULT_TRANSLATION_PROMPT;
+  }
+}
+
 /* AI Translation Engine & Model Selection */
 let currentTranslationModel = 'gemini-flash';
 let userApiKey = '';
-let adminPin = localStorage.getItem('sermon_admin_pin') || '7777';
+let adminPin = (typeof localStorage !== 'undefined' && localStorage.getItem('sermon_admin_pin')) || '7777';
 let isAdminUnlocked = false;
 
 // Multi-service API key storage
@@ -304,16 +503,20 @@ let apiKeysStore = {
   openai: ''
 };
 
-document.addEventListener('DOMContentLoaded', async () => {
-  loadAdminKeysFromStorage();
-  await loadKeysFromLocalEnvFile();
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', async () => {
+    loadAdminKeysFromStorage();
+    await loadKeysFromLocalEnvFile();
 
-  // Support URL hash navigation (e.g. #listener or #admin)
-  const hash = window.location.hash.replace('#', '');
-  if (['speaker', 'listener', 'calculator', 'admin'].includes(hash)) {
-    switchView(hash);
-  }
-});
+    // Support URL hash navigation (e.g. #listener or #admin)
+    const hash = window.location.hash.replace('#', '');
+    if (hash === 'calculator') {
+      switchView('admin');
+    } else if (['speaker', 'listener', 'admin'].includes(hash)) {
+      switchView(hash);
+    }
+  });
+}
 
 /* Auto-load keys exclusively from .env when running on a local dev server */
 async function loadKeysFromLocalEnvFile() {
@@ -455,7 +658,12 @@ function clearAllAdminKeys() {
 function lockAdminView() {
   isAdminUnlocked = false;
   document.getElementById('admin-pin-card').style.display = 'block';
-  document.getElementById('admin-keys-grid').style.display = 'none';
+  const unlockedContent = document.getElementById('admin-unlocked-content');
+  if (unlockedContent) {
+    unlockedContent.style.display = 'none';
+  } else {
+    document.getElementById('admin-keys-grid').style.display = 'none';
+  }
 }
 
 function unlockAdminWithPin() {
@@ -466,6 +674,10 @@ function unlockAdminWithPin() {
     isAdminUnlocked = true;
     errorMsg.style.display = 'none';
     document.getElementById('admin-pin-card').style.display = 'none';
+    const unlockedContent = document.getElementById('admin-unlocked-content');
+    if (unlockedContent) {
+      unlockedContent.style.display = 'flex';
+    }
     document.getElementById('admin-keys-grid').style.display = 'grid';
   } else {
     errorMsg.style.display = 'block';
@@ -588,10 +800,10 @@ function onModelChange() {
   
   const descElem = document.getElementById('model-desc');
   const descriptions = {
-    'gemini-flash': 'Recommended: Google Gemini 2.0/1.5 Flash - Pre-prompts AI with biblical vocabulary & homiletic context ($0.00 free tier).',
+    'gemini-flash': 'Recommended: Parallel Gemini 3.6 Flash + 3.5 Flash-Lite race for maximum speed and theological accuracy.',
     'deepl-api': 'DeepL Translate API: Superior grammatical precision & native fluency for European & Asian languages.',
     'gpt4o-mini': 'OpenAI GPT-4o-mini: High-reasoning contextual sermon translation.',
-    'offline-fast': 'Offline Native Engine: Zero-latency, dictionary lookup ($0.00).'
+    'offline-fast': 'Offline Native Engine: Zero-latency, dictionary lookup.'
   };
   descElem.innerText = descriptions[currentTranslationModel] || '';
 }
@@ -635,91 +847,174 @@ async function processSpokenText(spokenText) {
   updateInterimBlock(tempBlockId, blockData);
 
   // Broadcast to Listener View (same page + other tabs)
-  broadcastTranslation(translatedText, currentTargetLang);
+  broadcastTranslation(translatedText, currentTargetLang, formattedText, timestamp, selectedModel);
 }
 
 async function translateTextWithAI(text, targetLang, model) {
-  const apiKey = userApiKey;
-  
-  // 1. Live Gemini REST API Integration if key provided
-  if (model === 'gemini-flash' && apiKey) {
-    const promptText = `You are an expert theological sermon translator. Translate the following spoken sermon phrase into target language code "${targetLang}". Preserve biblical names, scripture citations, and homiletic dignity. Return ONLY the translated sentence.\n\nSermon text: "${text}"`;
-    const endpoints = [
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`
-    ];
+  const cleanText = (text || '').trim();
+  if (!cleanText) return '';
 
-    for (const url of endpoints) {
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              role: 'user',
-              parts: [{ text: promptText }]
+  const activeModel = model || currentTranslationModel || 'gemini-flash';
+  const cacheKey = `${targetLang}:${activeModel}:${cleanText}`;
+  if (translationCache.has(cacheKey)) {
+    return translationCache.get(cacheKey);
+  }
+
+  // 0. Instant 0ms Dictionary Hit (always check first for zero-latency demo/common phrases)
+  if (activeModel !== 'deepl-api' && translationDictionary[targetLang]?.[cleanText]) {
+    const dictHit = translationDictionary[targetLang][cleanText];
+    translationCache.set(cacheKey, dictHit);
+    return dictHit;
+  }
+
+  const geminiKey = apiKeysStore.gemini || userApiKey;
+  const targetLangName = LANGUAGE_NAME_MAP[targetLang] || targetLang;
+
+  // 1. Live Gemini REST API Integration (parallel speed-first race: Gemini 3.6 Flash + 3.5 Flash-Lite, no cost constraint)
+  if (activeModel === 'gemini-flash' && geminiKey) {
+    const customPromptEl = document.getElementById('translation-prompt-input');
+    const systemInstructions = (customPromptEl && customPromptEl.value.trim()) || DEFAULT_TRANSLATION_PROMPT;
+    const translationModels = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+
+    const callGeminiModel = async (modelName) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+      const response = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{
+              text: `${systemInstructions}\nTarget language: ${targetLangName} (${targetLang}). Output ONLY the translated text with no quotes, no preamble, and no notes.`
             }]
-          })
-        });
-        if (response.ok) {
-          const data = await response.json();
-          const aiResult = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (aiResult) return aiResult.trim();
-        }
-      } catch (e) {
-        console.warn(`Gemini translation call failed for ${url}:`, e);
+          },
+          contents: [{
+            role: 'user',
+            parts: [{ text: cleanText }]
+          }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 180,
+            responseMimeType: 'text/plain'
+          }
+        })
+      }, 4500);
+
+      if (!response.ok) {
+        throw new Error(`${modelName} HTTP ${response.status}`);
       }
+      const data = await response.json();
+      const aiResult = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!aiResult || !aiResult.trim()) {
+        throw new Error(`${modelName} empty response`);
+      }
+      return aiResult.trim();
+    };
+
+    try {
+      const fastestResult = await Promise.any(translationModels.map(callGeminiModel));
+      translationCache.set(cacheKey, fastestResult);
+      return fastestResult;
+    } catch (e) {
+      console.warn("All parallel Gemini translation models failed, falling back to local translation engine:", e);
     }
-    console.warn("All Gemini model endpoints failed, falling back to theological AI model prompt simulation.");
   }
 
   // 2. DeepL API Integration if key provided
-  if (model === 'deepl-api' && apiKey) {
+  const deeplKey = apiKeysStore.deepl || userApiKey;
+  if (activeModel === 'deepl-api' && deeplKey) {
     try {
-      const response = await fetch(`https://api-free.deepl.com/v2/translate`, {
+      const response = await fetchWithTimeout(`https://api-free.deepl.com/v2/translate`, {
         method: 'POST',
-        headers: { 'Authorization': `DeepL-Auth-Key ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: [text], target_lang: targetLang.toUpperCase() })
-      });
+        headers: { 'Authorization': `DeepL-Auth-Key ${deeplKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: [cleanText], target_lang: targetLang.toUpperCase() })
+      }, 3500);
       const data = await response.json();
-      if (data.translations?.[0]?.text) return data.translations[0].text;
+      if (data.translations?.[0]?.text) {
+        const result = data.translations[0].text.trim();
+        translationCache.set(cacheKey, result);
+        return result;
+      }
     } catch (e) {
       console.warn("DeepL API call failed, falling back to rules engine:", e);
     }
   }
 
-  // 3. Fallback Dictionary + Theological Pre-prompt simulation
-  if (translationDictionary[targetLang] && translationDictionary[targetLang][text]) {
-    return translationDictionary[targetLang][text];
+  // 3. OpenAI GPT-4o-mini Integration if selected & key provided
+  if (activeModel === 'gpt4o-mini' && apiKeysStore.openai) {
+    try {
+      const response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKeysStore.openai}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          temperature: 0.1,
+          max_tokens: 160,
+          messages: [
+            { role: 'system', content: `Translate the sermon text into ${targetLangName}. Return ONLY the translation.` },
+            { role: 'user', content: cleanText }
+          ]
+        })
+      }, 3500);
+      if (response.ok) {
+        const data = await response.json();
+        const result = data.choices?.[0]?.message?.content?.trim();
+        if (result) {
+          translationCache.set(cacheKey, result);
+          return result;
+        }
+      }
+    } catch (e) {
+      console.warn("OpenAI translation call failed, falling back to rules engine:", e);
+    }
+  }
+
+  // 4. Fallback Dictionary + Theological Pre-prompt simulation
+  if (translationDictionary[targetLang]?.[cleanText]) {
+    return translationDictionary[targetLang][cleanText];
   }
 
   // Pattern rule engine with theological contextual corrections
-  if (targetLang === 'es') {
-    return text.replace(/The Lord/gi, "El Señor")
-               .replace(/Jesus/gi, "Jesús")
-               .replace(/God/gi, "Dios")
-               .replace(/prayer/gi, "oración")
-               .replace(/church/gi, "iglesia")
-               .replace(/faith/gi, "fe")
-               .replace(/Gospel/gi, "Evangelio")
-               .replace(/Grace/gi, "Gracia")
-               .replace(/Salvation/gi, "Salvación")
-               .replace(/Psalms/gi, "Salmos");
+  if (targetLang === 'en') {
+    return cleanText.replace(/\bEl Señor\b/gi, "The Lord")
+                    .replace(/\bJesús\b/gi, "Jesus")
+                    .replace(/\bDios\b/gi, "God")
+                    .replace(/\boración\b/gi, "prayer")
+                    .replace(/\biglesia\b/gi, "church")
+                    .replace(/\bfe\b/gi, "faith")
+                    .replace(/\bEvangelio\b/gi, "Gospel")
+                    .replace(/\bGracia\b/gi, "Grace")
+                    .replace(/\bSalvación\b/gi, "Salvation")
+                    .replace(/\bSalmos\b/gi, "Psalms")
+                    .replace(/\bBienvenidos\b/gi, "Welcome")
+                    .replace(/\bAmén\b/gi, "Amen");
+  } else if (targetLang === 'es') {
+    return cleanText.replace(/The Lord/gi, "El Señor")
+                    .replace(/Jesus/gi, "Jesús")
+                    .replace(/God/gi, "Dios")
+                    .replace(/prayer/gi, "oración")
+                    .replace(/church/gi, "iglesia")
+                    .replace(/faith/gi, "fe")
+                    .replace(/Gospel/gi, "Evangelio")
+                    .replace(/Grace/gi, "Gracia")
+                    .replace(/Salvation/gi, "Salvación")
+                    .replace(/Psalms/gi, "Salmos");
   } else if (targetLang === 'fr') {
-    return text.replace(/The Lord/gi, "L'Éternel")
-               .replace(/Jesus/gi, "Jésus")
-               .replace(/God/gi, "Dieu")
-               .replace(/church/gi, "église")
-               .replace(/Gospel/gi, "Évangile");
+    return cleanText.replace(/The Lord/gi, "L'Éternel")
+                    .replace(/Jesus/gi, "Jésus")
+                    .replace(/God/gi, "Dieu")
+                    .replace(/church/gi, "église")
+                    .replace(/Gospel/gi, "Évangile");
   } else if (targetLang === 'pt') {
-    return text.replace(/The Lord/gi, "O Senhor")
-               .replace(/Jesus/gi, "Jesus")
-               .replace(/God/gi, "Deus")
-               .replace(/Gospel/gi, "Evangelho");
+    return cleanText.replace(/The Lord/gi, "O Senhor")
+                    .replace(/Jesus/gi, "Jesus")
+                    .replace(/God/gi, "Deus")
+                    .replace(/Gospel/gi, "Evangelho");
   }
 
-  return text; // Default return
+  return cleanText; // Default return
 }
 
 /* Render Speech Block with Model Badge */
@@ -761,56 +1056,191 @@ function updateInterimBlock(id, data) {
 }
 
 /* Broadcast to Congregation Listener */
-function broadcastTranslation(translatedText, lang) {
+function broadcastTranslation(translatedText, lang, originalText = '', timestamp = '', model = '') {
+  const ts = timestamp || new Date().toLocaleTimeString();
+  const mdl = model || currentTranslationModel;
+
   // 1. Update on local listener UI immediately
-  appendTranslationToListener(translatedText, lang);
+  appendTranslationToListener(translatedText, lang, originalText, ts, mdl);
 
   // 2. Post message to Broadcast Channel for other tabs
   if (broadcastChannel) {
     broadcastChannel.postMessage({
       type: 'NEW_TRANSLATION',
       translatedText,
-      language: lang
+      originalText,
+      language: lang,
+      timestamp: ts,
+      model: mdl
     });
   }
 
-  // 3. Update localStorage for fallback tab sync
-  localStorage.setItem('sermon_latest_translation', JSON.stringify({
+  // 3. Update localStorage for fallback tab sync & navigation persistence
+  const payload = {
     translatedText,
+    originalText,
     language: lang,
+    timestamp: ts,
+    model: mdl,
     time: Date.now()
-  }));
+  };
+  localStorage.setItem('sermon_latest_translation', JSON.stringify(payload));
+  try {
+    const history = JSON.parse(localStorage.getItem('sermon_transcript_history') || '[]');
+    const updated = Array.isArray(history) ? history : [];
+    updated.push(payload);
+    if (updated.length > 30) updated.shift();
+    localStorage.setItem('sermon_transcript_history', JSON.stringify(updated));
+  } catch (e) {}
 }
 
-/* Append Subtitle Line to Congregation View */
-function appendTranslationToListener(text, lang) {
-  const scrollBox = document.getElementById('listener-scroll-box');
-  const latestLine = document.getElementById('listener-latest-line');
+/* Update Audience View Audio Volume (0 - 100) */
+function onAudienceVolumeChange(val) {
+  const pct = Math.max(0, Math.min(100, Number(val) || 0));
+  audienceVolume = pct / 100;
+  try { localStorage.setItem('sermon_audience_volume', String(audienceVolume)); } catch (e) {}
 
-  if (!scrollBox) return;
+  const volLabel = document.getElementById('audience-volume-label');
+  if (volLabel) volLabel.innerText = `${pct}%`;
 
-  // Move previous latest line up
-  if (latestLine) {
-    latestLine.classList.remove('latest');
+  if (activeAudioElement) {
+    activeAudioElement.volume = audienceVolume;
   }
 
-  const newLine = document.createElement('div');
-  newLine.className = 'subtitle-line latest';
-  newLine.id = 'listener-latest-line';
-  newLine.innerText = text;
+  // Sync mute state with slider
+  if (pct === 0 && !isAudienceMuted) {
+    toggleAudienceMute();
+  } else if (pct > 0 && isAudienceMuted) {
+    isAudienceMuted = false;
+    unlockAudioPlayback();
+    updateAudienceMuteUI();
+  }
+}
 
-  scrollBox.appendChild(newLine);
-  scrollBox.scrollTop = scrollBox.scrollHeight;
+function updateAudienceMuteUI() {
+  const btn = document.getElementById('btn-audience-mute');
+  if (!btn) return;
+  if (isAudienceMuted) {
+    btn.innerText = '🔇 Muted (Read Only)';
+    btn.setAttribute('aria-pressed', 'true');
+    btn.style.background = 'rgba(239, 68, 68, 0.18)';
+    btn.style.borderColor = 'rgba(239, 68, 68, 0.45)';
+  } else {
+    btn.innerText = '🔊 Audio: ON';
+    btn.setAttribute('aria-pressed', 'false');
+    btn.style.background = '';
+    btn.style.borderColor = '';
+  }
+}
 
-  // If TTS Audio is enabled for listener, read aloud
-  if (isTTSAudioActive) {
-    speakTextTTS(text, lang);
+/* Toggle Mute / Unmute for Audience View (Read-Only Mode) */
+function toggleAudienceMute() {
+  isAudienceMuted = !isAudienceMuted;
+  if (isAudienceMuted) {
+    stopAllTTSPlayback();
+  } else {
+    unlockAudioPlayback();
+    if (audienceVolume === 0) {
+      audienceVolume = 0.85;
+      try { localStorage.setItem('sermon_audience_volume', String(audienceVolume)); } catch (e) {}
+      const slider = document.getElementById('audience-volume-slider');
+      const volLabel = document.getElementById('audience-volume-label');
+      if (slider) slider.value = 85;
+      if (volLabel) volLabel.innerText = '85%';
+    }
+  }
+  updateAudienceMuteUI();
+}
+
+/* Append Speech Block to Congregation View (replicates Pastor View Live Sermon Stream) */
+async function appendTranslationToListener(text, lang, originalText = '', timestamp = '', model = '', skipAudio = false) {
+  const container = document.getElementById('listener-stream-box');
+  if (!container) return;
+
+  const listenerLangSelect = document.getElementById('listener-language-select');
+  const listenerLang = (listenerLangSelect && listenerLangSelect.value) || currentTargetLang || lang || 'en';
+
+  let displayText = text;
+  if (listenerLang && lang && listenerLang !== lang) {
+    displayText = await translateTextWithAI(originalText || text, listenerLang, model || currentTranslationModel);
+  }
+
+  const modelLabels = {
+    'gemini-flash': '✨ Gemini 3.6 / 3.5 Flash AI',
+    'deepl-api': '🌐 DeepL API',
+    'gpt4o-mini': '🧠 GPT-4o-mini',
+    'offline-fast': '⚡ Fast Native'
+  };
+  const ts = timestamp || new Date().toLocaleTimeString();
+  const mdl = model || currentTranslationModel;
+
+  const block = document.createElement('div');
+  block.className = 'speech-block';
+  block.innerHTML = `
+    <div class="speech-meta">
+      <span class="timestamp">${escapeHtml(ts)}</span>
+      <span class="badge-tag" style="font-size: 0.65rem; background: rgba(99, 102, 241, 0.2);">${modelLabels[mdl] || escapeHtml(mdl)}</span>
+    </div>
+    ${originalText ? `<div class="speech-original">${escapeHtml(originalText)}</div>` : ''}
+    <div class="speech-translation" style="font-size: var(--subtitle-font-size, 1.35rem);">${escapeHtml(displayText)}</div>
+  `;
+
+  container.appendChild(block);
+  container.scrollTop = container.scrollHeight;
+
+  // Only play audio translation when in Audience View and not muted
+  if (!skipAudio && currentActiveView === 'listener' && isTTSAudioActive && !isAudienceMuted) {
+    enqueueTTS(displayText, listenerLang);
   }
 }
 
 /* Web Speech & Realtime Accent Synthesis (TTS for Listeners) */
 let selectedVoiceModel = 'gemini-live';
 let activeAudioElement = null;
+let isAudioUnlocked = false;
+const ttsQueue = [];
+let isPlayingTTS = false;
+
+function stopAllTTSPlayback() {
+  ttsQueue.length = 0;
+  isPlayingTTS = false;
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  if (activeAudioElement) {
+    try { activeAudioElement.pause(); } catch (e) {}
+    activeAudioElement = null;
+  }
+}
+
+async function enqueueTTS(text, langCode) {
+  ttsQueue.push({ text, langCode });
+  if (isPlayingTTS) return;
+  isPlayingTTS = true;
+  while (ttsQueue.length > 0) {
+    const item = ttsQueue.shift();
+    try {
+      await speakTextTTS(item.text, item.langCode, false);
+    } catch (e) {
+      console.warn("TTS queue item failed:", e);
+    }
+  }
+  isPlayingTTS = false;
+}
+
+/* Unlock browser audio playback on user gesture so async TTS never gets blocked */
+function unlockAudioPlayback() {
+  if (isAudioUnlocked) return;
+  try {
+    const silentWav = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+    const primer = new Audio(silentWav);
+    primer.volume = 0;
+    const p = primer.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => { isAudioUnlocked = true; }).catch(() => {});
+    }
+  } catch (e) {}
+}
 
 function onVoiceModelChange(modelName) {
   selectedVoiceModel = modelName;
@@ -825,29 +1255,23 @@ function onVoiceModelChange(modelName) {
   }
 }
 
-function toggleTTSAudio() {
-  isTTSAudioActive = !isTTSAudioActive;
-  const pill = document.getElementById('btn-tts-toggle');
-  const label = document.getElementById('tts-label');
-
-  if (isTTSAudioActive) {
-    pill.classList.add('active');
-    label.innerText = "Headphone Audio: ON 🎧";
-    speakTextTTS("Headphone audio translation enabled.", currentTargetLang || "en");
-  } else {
-    pill.classList.remove('active');
-    label.innerText = "Headphone Audio: OFF";
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
-    if (activeAudioElement) {
-      activeAudioElement.pause();
-    }
-  }
-}
-
-/* Convert 16-bit Linear PCM (24kHz mono from Gemini TTS) into a playable WAV Blob URL */
+/* Convert 16-bit Linear PCM (24kHz mono from Gemini TTS) into a clean, click-free WAV Blob URL */
 function pcm16Base64ToWavUrl(base64Pcm, sampleRate = 24000) {
   const binaryStr = atob(base64Pcm);
-  const pcmLen = binaryStr.length;
+  const rawLen = binaryStr.length;
+
+  // If payload already has a RIFF/WAVE header, return directly without double-wrapping
+  if (rawLen >= 12 && binaryStr.slice(0, 4) === 'RIFF' && binaryStr.slice(8, 12) === 'WAVE') {
+    const existingBytes = new Uint8Array(rawLen);
+    for (let i = 0; i < rawLen; i++) {
+      existingBytes[i] = binaryStr.charCodeAt(i);
+    }
+    return URL.createObjectURL(new Blob([existingBytes], { type: 'audio/wav' }));
+  }
+
+  // Ensure even byte length for 16-bit PCM frames
+  const pcmLen = rawLen & ~1;
+  const numSamples = pcmLen / 2;
   const wavBuffer = new ArrayBuffer(44 + pcmLen);
   const view = new DataView(wavBuffer);
 
@@ -861,27 +1285,51 @@ function pcm16Base64ToWavUrl(base64Pcm, sampleRate = 24000) {
   view.setUint32(4, 36 + pcmLen, true);
   writeStr(8, 'WAVE');
   writeStr(12, 'fmt ');
-  view.setUint32(16, 16, true);          // Subchunk1Size (16 for PCM)
-  view.setUint16(20, 1, true);           // AudioFormat (1 = Linear PCM)
-  view.setUint16(22, 1, true);           // NumChannels (1 = Mono)
-  view.setUint32(24, sampleRate, true);   // SampleRate
+  view.setUint32(16, 16, true);             // Subchunk1Size (16 for PCM)
+  view.setUint16(20, 1, true);              // AudioFormat (1 = Linear PCM)
+  view.setUint16(22, 1, true);              // NumChannels (1 = Mono)
+  view.setUint32(24, sampleRate, true);     // SampleRate
   view.setUint32(28, sampleRate * 2, true); // ByteRate (SampleRate * NumChannels * BitsPerSample/8)
-  view.setUint16(32, 2, true);           // BlockAlign
-  view.setUint16(34, 16, true);          // BitsPerSample
+  view.setUint16(32, 2, true);              // BlockAlign
+  view.setUint16(34, 16, true);             // BitsPerSample
   writeStr(36, 'data');
   view.setUint32(40, pcmLen, true);
 
-  const uint8 = new Uint8Array(wavBuffer, 44);
-  for (let i = 0; i < pcmLen; i++) {
-    uint8[i] = binaryStr.charCodeAt(i);
+  // Copy raw PCM bytes and compute DC offset
+  const samples = new Int16Array(numSamples);
+  let dcSum = 0;
+  for (let i = 0; i < numSamples; i++) {
+    const lo = binaryStr.charCodeAt(i * 2) & 0xff;
+    const hi = binaryStr.charCodeAt(i * 2 + 1) & 0xff;
+    let sample = (hi << 8) | lo;
+    if (sample >= 0x8000) sample -= 0x10000;
+    samples[i] = sample;
+    dcSum += sample;
+  }
+
+  const dcOffset = numSamples > 0 ? Math.round(dcSum / numSamples) : 0;
+  const fadeSamples = Math.min(Math.floor(sampleRate * 0.008), Math.floor(numSamples / 4));
+
+  for (let i = 0; i < numSamples; i++) {
+    let val = samples[i] - dcOffset;
+    if (fadeSamples > 0) {
+      if (i < fadeSamples) {
+        val = Math.round(val * (i / fadeSamples));
+      } else if (i >= numSamples - fadeSamples) {
+        val = Math.round(val * ((numSamples - 1 - i) / fadeSamples));
+      }
+    }
+    if (val > 32767) val = 32767;
+    if (val < -32768) val = -32768;
+    view.setInt16(44 + i * 2, val, true);
   }
 
   const blob = new Blob([wavBuffer], { type: 'audio/wav' });
   return URL.createObjectURL(blob);
 }
 
-/* Update TTS Status Badges in Audience View & Admin View */
-function updateTTSStatusUI(badgeText, badgeBg, badgeColor, detailText, audioUrl) {
+/* Update TTS Status Badges & Play Audio (awaits completion to prevent audio overlap) */
+function updateTTSStatusUI(badgeText, badgeBg, badgeColor, detailText, audioUrl, fallbackText, fallbackLang) {
   const badge = document.getElementById('tts-live-badge');
   if (badge) {
     badge.innerText = badgeText;
@@ -901,13 +1349,43 @@ function updateTTSStatusUI(badgeText, badgeBg, badgeColor, detailText, audioUrl)
     adminStatus.style.color = badgeColor;
   }
 
-  const player = document.getElementById('tts-audio-player');
-  if (player && audioUrl) {
-    player.style.display = 'inline-block';
-    player.src = audioUrl;
-    activeAudioElement = player;
-    player.play().catch(err => console.warn("Audio autoplay blocked:", err));
+  if (audioUrl) {
+    // Stop any currently playing audio before starting new phrase
+    if (activeAudioElement) {
+      try { activeAudioElement.pause(); } catch (e) {}
+    }
+
+    // Sync visible <audio controls> element in Admin View if present
+    const player = document.getElementById('tts-audio-player');
+    if (player) {
+      player.style.display = 'inline-block';
+      player.src = audioUrl;
+    }
+
+    // Play via standalone Audio instance and resolve when finished to prevent overlap
+    return new Promise((resolve) => {
+      const audio = new Audio(audioUrl);
+      audio.volume = currentActiveView === 'listener' ? audienceVolume : 1.0;
+      activeAudioElement = audio;
+      audio.onended = () => {
+        if (activeAudioElement === audio) activeAudioElement = null;
+        resolve();
+      };
+      audio.onerror = () => {
+        if (activeAudioElement === audio) activeAudioElement = null;
+        resolve();
+      };
+      audio.play().catch(err => {
+        console.warn("HTMLAudio play blocked, falling back to browser SpeechSynthesis:", err);
+        if (fallbackText) {
+          speakBrowserNativeTTS(fallbackText, fallbackLang || 'en').then(resolve);
+        } else {
+          resolve();
+        }
+      });
+    });
   }
+  return Promise.resolve();
 }
 
 /* Synthesize speech using Google Gemini TTS API or Google Cloud Text-to-Speech API */
@@ -915,12 +1393,8 @@ async function synthesizeWithGoogleTTS(text, langCode, apiKey, preferCloudNeural
   const personaSelect = document.getElementById('tts-voice-persona');
   const voicePersona = personaSelect ? personaSelect.value : 'Kore';
 
-  const bcp47Map = {
-    en: 'en-US', es: 'es-US', pt: 'pt-BR', fr: 'fr-FR',
-    ht: 'fr-FR', ko: 'ko-KR', tl: 'fil-PH', zh: 'cmn-CN',
-    vi: 'vi-VN', ru: 'ru-RU'
-  };
-  const bcp47Lang = bcp47Map[langCode] || 'en-US';
+  const bcp47Lang = BCP47_LANG_MAP[langCode] || 'en-US';
+  const targetLangName = LANGUAGE_NAME_MAP[langCode] || 'English';
 
   const cloudVoiceMap = {
     'en-US': 'en-US-Neural2-D',
@@ -929,7 +1403,7 @@ async function synthesizeWithGoogleTTS(text, langCode, apiKey, preferCloudNeural
     'fr-FR': 'fr-FR-Neural2-B',
     'ko-KR': 'ko-KR-Neural2-C',
     'fil-PH': 'fil-PH-Neural2-D',
-    'cmn-CN': 'cmn-CN-Wavenet-B',
+    'zh-CN': 'cmn-CN-Wavenet-B',
     'vi-VN': 'vi-VN-Neural2-D',
     'ru-RU': 'ru-RU-Wavenet-B'
   };
@@ -938,7 +1412,7 @@ async function synthesizeWithGoogleTTS(text, langCode, apiKey, preferCloudNeural
 
   // Helper 1: Try Google Cloud Text-to-Speech v1 REST API
   const tryCloudTTS = async () => {
-    const res = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(apiKey)}`, {
+    const res = await fetchWithTimeout(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(apiKey)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -953,7 +1427,7 @@ async function synthesizeWithGoogleTTS(text, langCode, apiKey, preferCloudNeural
           pitch: 0.0
         }
       })
-    });
+    }, 6000);
     const data = await res.json();
     if (res.ok && data.audioContent) {
       return {
@@ -965,27 +1439,31 @@ async function synthesizeWithGoogleTTS(text, langCode, apiKey, preferCloudNeural
     return null;
   };
 
-  // Helper 2: Try Gemini 2.5 Flash Preview TTS API (verified HTTP 200 on generativelanguage.googleapis.com)
+  // Helper 2: Try Gemini TTS APIs (fastest Gemini 3.8 Flash Lite TTS -> 2.5 Flash TTS -> 3.8 Flash TTS)
   const tryGeminiTTS = async () => {
     const ttsEndpoints = [
       {
-        label: `Gemini 2.5 Flash TTS (${voicePersona})`,
+        label: `Gemini 3.8 Flash-Lite TTS (${voicePersona} • ${targetLangName})`,
+        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-lite-tts:generateContent?key=${encodeURIComponent(apiKey)}`
+      },
+      {
+        label: `Gemini 2.5 Flash TTS (${voicePersona} • ${targetLangName})`,
         url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(apiKey)}`
       },
       {
-        label: `Gemini 2.5 Pro TTS (${voicePersona})`,
-        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-tts:generateContent?key=${encodeURIComponent(apiKey)}`
+        label: `Gemini 3.8 Flash TTS (${voicePersona} • ${targetLangName})`,
+        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=${encodeURIComponent(apiKey)}`
       }
     ];
 
     for (const ep of ttsEndpoints) {
       try {
-        const res = await fetch(ep.url, {
+        const res = await fetchWithTimeout(ep.url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{
-              parts: [{ text: `Say clearly and reverently: ${text}` }]
+              parts: [{ text }]
             }],
             generationConfig: {
               responseModalities: ['AUDIO'],
@@ -998,15 +1476,18 @@ async function synthesizeWithGoogleTTS(text, langCode, apiKey, preferCloudNeural
               }
             }
           })
-        });
+        }, 10000);
         const data = await res.json();
         if (res.ok) {
           const inlineData = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
           if (inlineData?.data) {
-            const mime = inlineData.mimeType || '';
-            const audioUrl = (mime.includes('L16') || mime.includes('pcm') || !mime.includes('mp3'))
-              ? pcm16Base64ToWavUrl(inlineData.data, 24000)
-              : `data:${mime};base64,${inlineData.data}`;
+            const mime = (inlineData.mimeType || '').toLowerCase();
+            const rateMatch = mime.match(/rate=(\d+)/);
+            const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+            const isEncodedAudio = mime.includes('mp3') || mime.includes('mpeg') || mime.includes('wav') || mime.includes('ogg') || mime.includes('aac') || mime.includes('webm');
+            const audioUrl = (!isEncodedAudio && (mime.includes('l16') || mime.includes('pcm') || mime === ''))
+              ? pcm16Base64ToWavUrl(inlineData.data, sampleRate)
+              : `data:${inlineData.mimeType || 'audio/wav'};base64,${inlineData.data}`;
             return { audioUrl, provider: ep.label };
           }
         } else {
@@ -1034,8 +1515,10 @@ async function synthesizeWithGoogleTTS(text, langCode, apiKey, preferCloudNeural
   throw new Error(lastErrorMessage || 'Google TTS API call failed');
 }
 
-/* Interactive Live TTS API Test Handler (for Audience View & Admin Tab) */
-async function runLiveTTSTest(source = 'listener') {
+/* Interactive Live TTS API Test Handler (Admin View) */
+async function runLiveTTSTest(source = 'admin') {
+  unlockAudioPlayback();
+  stopAllTTSPlayback();
   const customInput = document.getElementById('listener-tts-custom-text');
   const sampleText = (customInput && customInput.value.trim())
     ? customInput.value.trim()
@@ -1048,7 +1531,57 @@ async function runLiveTTSTest(source = 'listener') {
     userApiKey = apiKeysStore.gemini;
   }
 
-  await speakTextTTS(sampleText, currentTargetLang || 'en', true);
+  const listenerLangSelect = document.getElementById('listener-language-select');
+  const activeLang = (listenerLangSelect && listenerLangSelect.value) || currentTargetLang || 'en';
+  await speakTextTTS(sampleText, activeLang, true);
+}
+
+function speakBrowserNativeTTS(text, targetLang, startTime = null) {
+  if (!('speechSynthesis' in window)) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    window.speechSynthesis.cancel(); // cancel pending speech
+    const utterance = new SpeechSynthesisUtterance(text);
+    const personaSelect = document.getElementById('tts-voice-persona');
+    const voicePersona = personaSelect ? personaSelect.value : 'Kore';
+
+    const personaTuning = {
+      Kore: { pitch: 1.0, rate: 0.96 },
+      Charon: { pitch: 0.85, rate: 0.92 },
+      Puck: { pitch: 1.08, rate: 1.02 },
+      Aoede: { pitch: 1.04, rate: 0.98 },
+      Fenrir: { pitch: 0.9, rate: 1.0 }
+    };
+    const tuning = personaTuning[voicePersona] || { pitch: 1.0, rate: 1.0 };
+    utterance.pitch = tuning.pitch;
+    utterance.rate = tuning.rate;
+
+    const bcp47Lang = BCP47_LANG_MAP[targetLang] || 'en-US';
+    const langPrefix = bcp47Lang.split('-')[0];
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v => v.lang.startsWith(langPrefix) && (v.name.includes('Natural') || v.name.includes('Enhanced') || v.name.includes('Google') || v.name.includes('Siri'))) ||
+                           voices.find(v => v.lang.startsWith(langPrefix));
+
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+
+    utterance.lang = bcp47Lang;
+    utterance.volume = currentActiveView === 'listener' ? audienceVolume : 1.0;
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve();
+    window.speechSynthesis.speak(utterance);
+
+    if (startTime !== null && selectedVoiceModel === 'browser-native') {
+      const elapsedMs = Math.round(performance.now() - startTime);
+      updateTTSStatusUI(
+        '🔊 Browser Native TTS',
+        'rgba(20, 184, 166, 0.2)',
+        '#14b8a6',
+        `${preferredVoice ? preferredVoice.name : utterance.lang} • ${elapsedMs}ms`
+      );
+    }
+  });
 }
 
 async function speakTextTTS(text, langCode, forceApiTest = false) {
@@ -1064,12 +1597,14 @@ async function speakTextTTS(text, langCode, forceApiTest = false) {
       try {
         const result = await synthesizeWithGoogleTTS(text, targetLang, geminiKey, selectedVoiceModel === 'gcloud-neural');
         const elapsedMs = Math.round(performance.now() - startTime);
-        updateTTSStatusUI(
+        await updateTTSStatusUI(
           '⚡ Live API Audio',
           'rgba(34, 197, 94, 0.2)',
           '#4ade80',
           `${result.provider} • ${elapsedMs}ms`,
-          result.audioUrl
+          result.audioUrl,
+          text,
+          targetLang
         );
         return;
       } catch (err) {
@@ -1110,12 +1645,14 @@ async function speakTextTTS(text, langCode, forceApiTest = false) {
         const audioBlob = await res.blob();
         const audioUrl = URL.createObjectURL(audioBlob);
         const elapsedMs = Math.round(performance.now() - startTime);
-        updateTTSStatusUI(
+        await updateTTSStatusUI(
           '⚡ ElevenLabs Live Audio',
           'rgba(34, 197, 94, 0.2)',
           '#4ade80',
           `ElevenLabs Multilingual v2 • ${elapsedMs}ms`,
-          audioUrl
+          audioUrl,
+          text,
+          targetLang
         );
         return;
       }
@@ -1125,72 +1662,35 @@ async function speakTextTTS(text, langCode, forceApiTest = false) {
   }
 
   // 3. Native Browser Web Speech Synthesis Fallback
-  if (!('speechSynthesis' in window)) return;
-
-  window.speechSynthesis.cancel(); // cancel pending speech
-  const utterance = new SpeechSynthesisUtterance(text);
-  const personaSelect = document.getElementById('tts-voice-persona');
-  const voicePersona = personaSelect ? personaSelect.value : 'Kore';
-
-  // Apply accent / voice persona tuning for native fallback
-  const personaTuning = {
-    Kore: { pitch: 1.0, rate: 0.96 },
-    Charon: { pitch: 0.85, rate: 0.92 },
-    Puck: { pitch: 1.08, rate: 1.02 },
-    Aoede: { pitch: 1.04, rate: 0.98 },
-    Fenrir: { pitch: 0.9, rate: 1.0 }
-  };
-  const tuning = personaTuning[voicePersona] || { pitch: 1.0, rate: 1.0 };
-  utterance.pitch = tuning.pitch;
-  utterance.rate = tuning.rate;
-
-  const voices = window.speechSynthesis.getVoices();
-  const preferredVoice = voices.find(v => v.lang.startsWith(targetLang) && (v.name.includes('Natural') || v.name.includes('Enhanced') || v.name.includes('Google') || v.name.includes('Siri'))) ||
-                         voices.find(v => v.lang.startsWith(targetLang));
-
-  if (preferredVoice) {
-    utterance.voice = preferredVoice;
-  }
-
-  utterance.lang = targetLang === 'en' ? 'en-US' : targetLang;
-  window.speechSynthesis.speak(utterance);
-
-  if (selectedVoiceModel === 'browser-native') {
-    const elapsedMs = Math.round(performance.now() - startTime);
-    updateTTSStatusUI(
-      '🔊 Browser Native TTS',
-      'rgba(20, 184, 166, 0.2)',
-      '#14b8a6',
-      `${preferredVoice ? preferredVoice.name : utterance.lang} • ${elapsedMs}ms`
-    );
-  }
+  await speakBrowserNativeTTS(text, targetLang, startTime);
 }
 
 /* Primary Target & Listener Language Handlers */
 function onPrimaryTargetChange(lang) {
   currentTargetLang = lang;
+  const listenerSelect = document.getElementById('listener-language-select');
+  if (listenerSelect) listenerSelect.value = lang;
+  const flagEl = document.getElementById('listener-flag');
+  if (flagEl) flagEl.innerText = FLAG_MAP[lang] || '🌐';
 }
 
 function onListenerLangChange(lang) {
   currentTargetLang = lang;
-  document.getElementById('primary-target-lang').value = lang;
-
-  const flagMap = {
-    en: '🇺🇸', es: '🇲🇽', pt: '🇧🇷', fr: '🇫🇷', ht: '🇭🇹',
-    ko: '🇰🇷', tl: '🇵🇭', zh: '🇨🇳', vi: '🇻🇳', ru: '🇷🇺'
-  };
-  document.getElementById('listener-flag').innerText = flagMap[lang] || '🌐';
+  const primarySelect = document.getElementById('primary-target-lang');
+  if (primarySelect) primarySelect.value = lang;
+  const flagEl = document.getElementById('listener-flag');
+  if (flagEl) flagEl.innerText = FLAG_MAP[lang] || '🌐';
 }
 
 /* Font Size Adjustments for Accessibility */
 function adjustFontSize(delta) {
-  currentFontSize = Math.max(1.1, Math.min(3.0, currentFontSize + (delta * 0.15)));
+  currentFontSize = Math.max(0.95, Math.min(2.5, currentFontSize + (delta * 0.12)));
   document.documentElement.style.setProperty('--subtitle-font-size', `${currentFontSize}rem`);
 }
 
 function resetFontSize() {
-  currentFontSize = 1.75;
-  document.documentElement.style.setProperty('--subtitle-font-size', `1.75rem`);
+  currentFontSize = 1.35;
+  document.documentElement.style.setProperty('--subtitle-font-size', `1.35rem`);
 }
 
 /* Theme Switching */
@@ -1204,6 +1704,7 @@ function setTheme(themeName) {
 
 /* Demo Phrase Simulation */
 function insertSampleSermonPhrase() {
+  unlockAudioPlayback();
   const phrase = sampleSermonPhrases[demoPhraseIndex];
   demoPhraseIndex = (demoPhraseIndex + 1) % sampleSermonPhrases.length;
   processSpokenText(phrase);
@@ -1246,18 +1747,19 @@ function exportTranscript(format) {
 
 function clearStream() {
   transcriptHistory = [];
-  document.getElementById('speaker-stream-box').innerHTML = `
+  try { localStorage.removeItem('sermon_transcript_history'); } catch (e) {}
+  stopAllTTSPlayback();
+  const clearedHtml = `
     <div class="speech-block">
       <div class="speech-meta"><span class="timestamp">CLEARED</span><span>READY</span></div>
       <div class="speech-original">Stream cleared. Ready for pastor input.</div>
-      <div class="speech-translation">Transmisión borrada. Listo para el pastor.</div>
+      <div class="speech-translation" style="font-size: var(--subtitle-font-size, 1.35rem);">Transmisión borrada. Listo para el pastor.</div>
     </div>
   `;
-  document.getElementById('listener-scroll-box').innerHTML = `
-    <div class="subtitle-line latest" id="listener-latest-line">
-      Stream cleared. Ready for live sermon...
-    </div>
-  `;
+  const speakerBox = document.getElementById('speaker-stream-box');
+  if (speakerBox) speakerBox.innerHTML = clearedHtml;
+  const listenerBox = document.getElementById('listener-stream-box');
+  if (listenerBox) listenerBox.innerHTML = clearedHtml;
 }
 
 /* Simulated QR Code SVG Generator */

@@ -43,10 +43,6 @@
         <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         Audience View
       </button>
-      <button class="tab-btn" id="tab-calculator" onclick="switchView('calculator')">
-        <svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="16" y1="14" x2="16" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg>
-        Cost Calculator
-      </button>
       <button class="tab-btn" id="tab-admin" onclick="switchView('admin')">
         <svg viewBox="0 0 24 24" style="fill:none; stroke:currentColor; stroke-width:2;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         Admin Settings
@@ -118,46 +114,6 @@
             </div>
           </div>
 
-          <!-- AI Translation & STT Model Selection Card -->
-          <div class="glass-card">
-            <h2 class="card-title">
-              AI Engine & Accuracy
-              <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z"/></svg>
-            </h2>
-
-            <div class="form-group">
-              <label class="form-label">Translation Model</label>
-              <select class="form-select" id="translation-model-select" onchange="onModelChange()">
-                <option value="gemini-flash" selected>✨ Gemini 2.0 / 1.5 Flash (Theological AI - Free Tier)</option>
-                <option value="deepl-api">🌐 DeepL Translate API (High Precision)</option>
-                <option value="gpt4o-mini">🧠 OpenAI GPT-4o-mini (Deep Reasoning)</option>
-                <option value="offline-fast">⚡ Offline Native / Dictionary ($0.00)</option>
-              </select>
-              <p style="font-size: 0.75rem; color: var(--accent-teal); margin-top: 0.3rem;" id="model-desc">
-                Recommended: Pre-prompts AI with biblical vocabulary & homiletic context.
-              </p>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Speech-to-Text (STT) Model</label>
-              <select class="form-select" id="stt-model-select">
-                <option value="web-speech" selected>🎙️ Browser Web Speech API (Free Native)</option>
-                <option value="groq-whisper">⚡ Groq Whisper Large v3 (Noise Filter)</option>
-                <option value="openai-whisper">🎧 OpenAI Whisper-1</option>
-              </select>
-            </div>
-
-            <!-- Optional API Key Input for Live Testing -->
-            <div class="form-group" style="margin-bottom: 0.5rem;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
-                <label class="form-label" style="margin-bottom: 0;">API Key (Optional for Live API)</label>
-                <button class="btn-copy" style="padding: 0.15rem 0.5rem; font-size: 0.7rem;" onclick="toggleApiKeyVisibility()">👁️ Show/Hide</button>
-              </div>
-              <input type="password" class="form-input" id="api-key-input" placeholder="Paste Gemini / DeepL / OpenAI Key" onchange="saveApiKey(this.value)">
-              <span style="font-size: 0.725rem; color: var(--text-muted);">Leave empty to use built-in theological AI prompt simulation.</span>
-            </div>
-          </div>
-
           <!-- Room Code & QR Share -->
           <div class="glass-card">
             <h2 class="card-title">
@@ -173,22 +129,27 @@
             </div>
           </div>
 
-          <!-- Theological Glossary Booster -->
-          <div class="glass-card">
-            <h2 class="card-title">
-              Theological Dictionary
-              <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-            </h2>
-            <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
-              Auto-corrects spoken biblicals, places, and ministry terminology.
-            </p>
-            <input type="text" class="form-input" id="glossary-input" placeholder="e.g. Genesis, YHVH, Grace, Nebuchadnezzar" value="Grace, Salvation, Genesis, Corinthians, Leviticus, Disciple">
-          </div>
-
         </div>
 
-        <!-- Right Column: Live Dual Transcript Feed -->
-        <div class="glass-card transcript-feed-container">
+        <!-- Right Column: Prompting Card + Live Dual Transcript Feed -->
+        <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+
+          <!-- AI Translation Prompting Card -->
+          <div class="glass-card" id="prompting-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+              <h2 class="card-title" style="margin-bottom: 0;">
+                Translation Prompting
+                <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </h2>
+              <button class="btn-copy" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;" onclick="resetTranslationPrompt()">↺ Reset Default</button>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.65rem;">
+              Customize system instructions, theological tone, and terminology rules sent to the AI translator.
+            </p>
+            <textarea class="form-input" id="translation-prompt-input" rows="2" style="width: 100%; resize: vertical; font-family: inherit; line-height: 1.45;" placeholder="Enter custom translation instructions...">You are an expert theological sermon translator. Preserve biblical names, scripture citations, and homiletic dignity. Return ONLY the translated sentence.</textarea>
+          </div>
+
+          <div class="glass-card transcript-feed-container">
           <div class="feed-header-toolbar">
             <div>
               <h2 style="font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; color: var(--text-primary);">
@@ -241,6 +202,8 @@
 
         </div>
 
+        </div>
+
       </div>
     </section>
 
@@ -248,7 +211,7 @@
     <section class="view-section" id="view-listener">
       <div class="listener-layout">
         
-        <!-- Top Customization Bar -->
+        <!-- Top Customization Bar (Language, Persona & Font Size Only) -->
         <div class="listener-top-bar">
           <div class="language-selector-wrapper">
             <span class="lang-flag" id="listener-flag">🇺🇸</span>
@@ -266,21 +229,10 @@
             </select>
           </div>
 
-          <!-- Voice & Accent Model Selector -->
-          <div class="language-selector-wrapper">
-            <span style="font-size: 0.8rem; color: var(--text-secondary); margin-right: 0.2rem;">Voice Engine:</span>
-            <select class="form-select" id="voice-model-select" style="min-width: 210px; font-size: 0.825rem;" onchange="onVoiceModelChange(this.value)">
-              <option value="gemini-live" selected>✨ Google Gemini / Cloud TTS API</option>
-              <option value="gcloud-neural">☁️ Google Cloud Neural2 TTS API</option>
-              <option value="elevenlabs-accent">🎙️ ElevenLabs Spanish Accent</option>
-              <option value="browser-native">🔊 Native Browser Speech Engine</option>
-            </select>
-          </div>
-
-          <!-- Google TTS Voice Persona Selector -->
+          <!-- Voice Persona Selector -->
           <div class="language-selector-wrapper">
             <span style="font-size: 0.8rem; color: var(--text-secondary); margin-right: 0.2rem;">Persona:</span>
-            <select class="form-select" id="tts-voice-persona" style="min-width: 150px; font-size: 0.825rem;">
+            <select class="form-select" id="tts-voice-persona" style="min-width: 165px; font-size: 0.85rem;">
               <option value="Kore" selected>Kore (Warm Pastoral)</option>
               <option value="Charon">Charon (Deep Reverent)</option>
               <option value="Puck">Puck (Clear Expressive)</option>
@@ -288,20 +240,6 @@
               <option value="Fenrir">Fenrir (Strong Dynamic)</option>
             </select>
           </div>
-
-          <!-- Text-to-Speech (TTS) Audio Toggle for Listeners -->
-          <button class="tts-audio-pill" id="btn-tts-toggle" onclick="toggleTTSAudio()">
-            <svg viewBox="0 0 24 24" style="width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2;">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-            </svg>
-            <span id="tts-label">Headphone Audio: OFF</span>
-          </button>
-
-          <!-- Instant TTS API Test Button -->
-          <button class="action-btn" id="btn-listener-tts-test" onclick="runLiveTTSTest('listener')" style="border-color: rgba(99, 102, 241, 0.4); color: var(--primary-light);">
-            🔊 Test TTS API
-          </button>
 
           <!-- Font Size Adjuster -->
           <div class="font-size-controls">
@@ -311,148 +249,48 @@
             <button class="control-btn" onclick="adjustFontSize(2)" title="Larger Text">A+</button>
           </div>
 
-          <!-- Theme Adjuster -->
-          <div class="theme-controls">
-            <span style="font-size: 0.8rem; color: var(--text-secondary); margin-right: 0.3rem;">Theme:</span>
-            <button class="control-btn" onclick="setTheme('dark')" title="Dark Mode">🌙</button>
-            <button class="control-btn" onclick="setTheme('warm')" title="Warm Reading Mode">📜</button>
-            <button class="control-btn" onclick="setTheme('light')" title="Light Mode">☀️</button>
-            <button class="control-btn" onclick="setTheme('high-contrast')" title="High Contrast Mode">⚡</button>
+          <!-- Audio Mute & Volume Controls (Audience View) -->
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <button class="control-btn" id="btn-audience-mute" onclick="toggleAudienceMute()" aria-pressed="false" title="Mute or unmute translated audio" style="width: auto; padding: 0 0.85rem; gap: 0.4rem; font-size: 0.82rem;">
+              🔊 Audio: ON
+            </button>
+            <label for="audience-volume-slider" style="font-size: 0.8rem; color: var(--text-secondary);">Vol:</label>
+            <input type="range" id="audience-volume-slider" min="0" max="100" value="100" oninput="onAudienceVolumeChange(this.value)" aria-label="Audience audio volume" style="width: 90px; accent-color: var(--primary); cursor: pointer;">
+            <span id="audience-volume-label" style="font-size: 0.78rem; color: var(--text-secondary); min-width: 34px; text-align: right;">100%</span>
           </div>
         </div>
 
-        <!-- Live TTS API Status & Quick Test Bar -->
-        <div class="glass-card" id="listener-tts-status-bar" style="padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
-          <div style="display: flex; align-items: center; gap: 0.75rem; flex: 1; min-width: 260px;">
-            <span class="badge-tag" id="tts-live-badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">TTS API Ready</span>
-            <input type="text" class="form-input" id="listener-tts-custom-text" value="The Lord is my shepherd; I shall not want. Grace and peace be with you all." style="padding: 0.45rem 0.75rem; font-size: 0.85rem; flex: 1;" placeholder="Enter sermon phrase to synthesize with Google TTS API...">
-          </div>
-          <div style="display: flex; align-items: center; gap: 0.6rem;">
-            <audio id="tts-audio-player" controls style="height: 32px; max-width: 220px; display: none;"></audio>
-            <span id="tts-latency-label" style="font-size: 0.75rem; color: var(--text-secondary);"></span>
-          </div>
-        </div>
-
-        <!-- Teleprompter Subtitle Display Board -->
-        <div class="subtitle-board">
-          <div class="subtitle-scroll-container" id="listener-scroll-box">
-            <div class="subtitle-line">
-              Bienvenidos al servicio de hoy. Abran sus Biblias en el Libro de los Salmos.
-            </div>
-            <div class="subtitle-line latest" id="listener-latest-line">
-              Waiting for live translation stream...
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- 3. COST ESTIMATOR & PRD CALCULATOR VIEW -->
-    <section class="view-section" id="view-calculator">
-      <div style="max-width: 1000px; margin: 0 auto;">
-        
-        <div style="margin-bottom: 2rem; text-align: center;">
-          <h2 style="font-family: var(--font-display); font-size: 2rem; font-weight: 800; background: linear-gradient(135deg, #ffffff 0%, var(--primary-light) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-            Church Cost Estimator
-          </h2>
-          <p style="color: var(--text-secondary); max-width: 600px; margin: 0.5rem auto 0 auto;">
-            Compare monthly operational costs for Tier 0 (Free Browser Native) vs Tier 1 (Cloud AI APIs) based on your ministry's schedule.
-          </p>
-        </div>
-
-        <div class="calculator-grid">
-          
-          <!-- Slider Controls Card -->
-          <div class="glass-card">
-            <h3 class="card-title">Services & Audience Config</h3>
-
-            <!-- Slider 1: Sermons / Month -->
-            <div class="calc-slider-group">
-              <div class="calc-slider-header">
-                <span>Sermons / Month:</span>
-                <span class="calc-slider-value" id="val-sermons-per-month">4</span>
-              </div>
-              <input type="range" class="custom-range" min="1" max="20" value="4" id="slider-sermons" oninput="calculateCost()">
-            </div>
-
-            <!-- Slider 2: Average Sermon Duration (Minutes) -->
-            <div class="calc-slider-group">
-              <div class="calc-slider-header">
-                <span>Sermon Duration (Minutes):</span>
-                <span class="calc-slider-value" id="val-duration-mins">60</span>
-              </div>
-              <input type="range" class="custom-range" min="15" max="180" step="15" value="60" id="slider-duration" oninput="calculateCost()">
-            </div>
-
-            <!-- Slider 3: Target Languages Translated -->
-            <div class="calc-slider-group">
-              <div class="calc-slider-header">
-                <span>Target Languages:</span>
-                <span class="calc-slider-value" id="val-languages">2</span>
-              </div>
-              <input type="range" class="custom-range" min="1" max="10" value="2" id="slider-languages" oninput="calculateCost()">
-            </div>
-
-            <!-- Slider 4: Concurrent Audience Members -->
-            <div class="calc-slider-group">
-              <div class="calc-slider-header">
-                <span>Live Audience Listeners:</span>
-                <span class="calc-slider-value" id="val-listeners">50</span>
-              </div>
-              <input type="range" class="custom-range" min="5" max="500" step="5" value="50" id="slider-listeners" oninput="calculateCost()">
-            </div>
-
-          </div>
-
-          <!-- Total Price Breakdown Card -->
-          <div class="cost-comparison-card">
+        <!-- Replicated Live Sermon Stream Card -->
+        <div class="glass-card transcript-feed-container">
+          <div class="feed-header-toolbar">
             <div>
-              <div style="font-size: 0.85rem; text-transform: uppercase; font-weight: 700; color: var(--accent-teal); letter-spacing: 1px;">
-                Recommended Tier 0 Architecture
-              </div>
-              <div class="price-display-huge">
-                $0.00 <span class="price-unit">/ month</span>
-              </div>
-              <p style="font-size: 0.875rem; color: var(--text-secondary);">
-                Uses Web Speech API + Gemini 2.0 Flash Free Tier + Browser Web Speech Synthesis. Completely free for unlimited congregants!
-              </p>
-
-              <ul class="breakdown-list">
-                <li class="breakdown-item">
-                  <span class="breakdown-label">Speech Recognition (Browser Native / Whisper Free)</span>
-                  <span class="breakdown-cost">$0.00</span>
-                </li>
-                <li class="breakdown-item">
-                  <span class="breakdown-label">Translation API (Gemini Free 1M Tokens/Day)</span>
-                  <span class="breakdown-cost">$0.00</span>
-                </li>
-                <li class="breakdown-item">
-                  <span class="breakdown-label">Live Data Stream (Firebase Spark Free Tier)</span>
-                  <span class="breakdown-cost">$0.00</span>
-                </li>
-                <li class="breakdown-item">
-                  <span class="breakdown-label">Hosting (Vercel / Cloudflare Pages)</span>
-                  <span class="breakdown-cost">$0.00</span>
-                </li>
-              </ul>
+              <h2 style="font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; color: var(--text-primary);">
+                Live Sermon Stream
+              </h2>
+              <p style="font-size: 0.8rem; color: var(--text-secondary);">Real-time speech transcription &amp; instant translation feed</p>
             </div>
-
-            <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1);">
-              <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-secondary);">
-                <span>Tier 1 Paid Cloud AI Fallback Cost:</span>
-                <span style="color: var(--primary-light); font-weight: 700;" id="calc-tier1-total">$0.18 / mo</span>
-              </div>
-            </div>
-
           </div>
 
+          <div class="live-stream-box" id="listener-stream-box">
+            <div class="speech-block">
+              <div class="speech-meta">
+                <span class="timestamp">10:00:00 AM</span>
+                <span>SYSTEM READY</span>
+              </div>
+              <div class="speech-original">
+                Bienvenidos al servicio de hoy. Abran sus Biblias en el Libro de los Salmos.
+              </div>
+              <div class="speech-translation" style="font-size: var(--subtitle-font-size, 1.35rem);">
+                Welcome to today's service. Turn your Bibles to the Book of Psalms.
+              </div>
+            </div>
+          </div>
         </div>
 
       </div>
     </section>
 
-    <!-- 4. ADMIN & API KEYS CONFIGURATION VIEW -->
+    <!-- 3. ADMIN, AI ENGINE & COST CALCULATOR VIEW -->
     <section class="view-section" id="view-admin">
       <div style="max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.5rem;">
         
@@ -501,8 +339,82 @@
           <p id="pin-error-msg" style="color: var(--accent-rose); font-size: 0.8rem; display: none;">Incorrect PIN. Try 7777.</p>
         </div>
 
-        <!-- API Keys Configuration Grid -->
-        <div class="calculator-grid" id="admin-keys-grid">
+        <!-- Unlocked Admin Content (AI Engine, API Keys & Cost Calculator) -->
+        <div id="admin-unlocked-content" style="display: flex; flex-direction: column; gap: 1.75rem;">
+
+          <!-- AI Translation & STT Model Selection Card (Moved from Pastor Dashboard) -->
+          <div class="glass-card">
+            <h2 class="card-title">
+              AI Engine & Accuracy
+              <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-6h2zm0-8h-2V7h2z"/></svg>
+            </h2>
+
+            <div class="calculator-grid" style="align-items: start;">
+              <div>
+                <div class="form-group">
+                  <label class="form-label">Translation Model</label>
+                  <select class="form-select" id="translation-model-select" onchange="onModelChange()">
+                    <option value="gemini-flash" selected>✨ Gemini 3.6 Flash + 3.5 Flash-Lite (Parallel Speed-First)</option>
+                    <option value="deepl-api">🌐 DeepL Translate API (High Precision)</option>
+                    <option value="gpt4o-mini">🧠 OpenAI GPT-4o-mini (Deep Reasoning)</option>
+                    <option value="offline-fast">⚡ Offline Native / Dictionary</option>
+                  </select>
+                  <p style="font-size: 0.75rem; color: var(--accent-teal); margin-top: 0.3rem;" id="model-desc">
+                    Recommended: Parallel Gemini 3.6 Flash + 3.5 Flash-Lite race for maximum speed and theological accuracy.
+                  </p>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Speech-to-Text (STT) Model</label>
+                  <select class="form-select" id="stt-model-select">
+                    <option value="web-speech" selected>🎙️ Browser Web Speech API (Free Native)</option>
+                    <option value="groq-whisper">⚡ Groq Whisper Large v3 (Noise Filter)</option>
+                    <option value="openai-whisper">🎧 OpenAI Whisper-1</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Optional API Key Input & Voice Engine / TTS Testing (Admin View Only) -->
+              <div>
+                <div class="form-group">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+                    <label class="form-label" style="margin-bottom: 0;">API Key (Optional for Live API)</label>
+                    <button class="btn-copy" style="padding: 0.15rem 0.5rem; font-size: 0.7rem;" onclick="toggleApiKeyVisibility()">👁️ Show/Hide</button>
+                  </div>
+                  <input type="password" class="form-input" id="api-key-input" placeholder="Paste Gemini / DeepL / OpenAI Key" onchange="saveApiKey(this.value)">
+                  <span style="font-size: 0.725rem; color: var(--text-muted); display: block; margin-top: 0.35rem;">Leave empty to use built-in theological AI prompt simulation.</span>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Voice &amp; TTS Engine</label>
+                  <select class="form-select" id="voice-model-select" onchange="onVoiceModelChange(this.value)">
+                    <option value="gemini-live" selected>✨ Google Gemini / Cloud TTS API</option>
+                    <option value="gcloud-neural">☁️ Google Cloud Neural2 TTS API</option>
+                    <option value="elevenlabs-accent">🎙️ ElevenLabs Spanish Accent</option>
+                    <option value="browser-native">🔊 Native Browser Speech Engine</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Live TTS API Testing Bar (Moved to Admin View) -->
+            <div id="admin-tts-test-bar" style="margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.08); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+              <div style="display: flex; align-items: center; gap: 0.75rem; flex: 1; min-width: 260px;">
+                <span class="badge-tag" id="tts-live-badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">TTS API Ready</span>
+                <input type="text" class="form-input" id="listener-tts-custom-text" value="The Lord is my shepherd; I shall not want. Grace and peace be with you all." style="padding: 0.45rem 0.75rem; font-size: 0.85rem; flex: 1;" placeholder="Enter sermon phrase to test TTS API...">
+                <button class="action-btn" id="btn-admin-tts-test" onclick="runLiveTTSTest('admin')" style="border-color: rgba(99, 102, 241, 0.4); color: var(--primary-light); white-space: nowrap;">
+                  🔊 Test TTS API
+                </button>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.6rem;">
+                <audio id="tts-audio-player" controls style="height: 32px; max-width: 220px; display: none;"></audio>
+                <span id="tts-latency-label" style="font-size: 0.75rem; color: var(--text-secondary);"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- API Keys Configuration Grid -->
+          <div class="calculator-grid" id="admin-keys-grid">
           
           <!-- 1. Google Gemini API Card -->
           <div class="glass-card">
@@ -644,6 +556,108 @@
               <button class="action-btn" onclick="testAllConnections()">
                 ⚡ Test All Connections
               </button>
+            </div>
+          </div>
+
+        </div>
+
+          <!-- Church Cost Estimator & Calculator (Moved to Admin View) -->
+          <div style="margin-top: 0.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.08);">
+            <div style="margin-bottom: 1.5rem; text-align: center;">
+              <h2 style="font-family: var(--font-display); font-size: 1.75rem; font-weight: 800; background: linear-gradient(135deg, #ffffff 0%, var(--primary-light) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                Church Cost Estimator
+              </h2>
+              <p style="color: var(--text-secondary); max-width: 600px; margin: 0.4rem auto 0 auto; font-size: 0.9rem;">
+                Compare monthly operational costs for Tier 0 (Free Browser Native) vs Tier 1 (Cloud AI APIs) based on your ministry's schedule.
+              </p>
+            </div>
+
+            <div class="calculator-grid">
+              
+              <!-- Slider Controls Card -->
+              <div class="glass-card">
+                <h3 class="card-title">Services & Audience Config</h3>
+
+                <!-- Slider 1: Sermons / Month -->
+                <div class="calc-slider-group">
+                  <div class="calc-slider-header">
+                    <span>Sermons / Month:</span>
+                    <span class="calc-slider-value" id="val-sermons-per-month">4</span>
+                  </div>
+                  <input type="range" class="custom-range" min="1" max="20" value="4" id="slider-sermons" oninput="calculateCost()">
+                </div>
+
+                <!-- Slider 2: Average Sermon Duration (Minutes) -->
+                <div class="calc-slider-group">
+                  <div class="calc-slider-header">
+                    <span>Sermon Duration (Minutes):</span>
+                    <span class="calc-slider-value" id="val-duration-mins">60</span>
+                  </div>
+                  <input type="range" class="custom-range" min="15" max="180" step="15" value="60" id="slider-duration" oninput="calculateCost()">
+                </div>
+
+                <!-- Slider 3: Target Languages Translated -->
+                <div class="calc-slider-group">
+                  <div class="calc-slider-header">
+                    <span>Target Languages:</span>
+                    <span class="calc-slider-value" id="val-languages">2</span>
+                  </div>
+                  <input type="range" class="custom-range" min="1" max="10" value="2" id="slider-languages" oninput="calculateCost()">
+                </div>
+
+                <!-- Slider 4: Concurrent Audience Members -->
+                <div class="calc-slider-group">
+                  <div class="calc-slider-header">
+                    <span>Live Audience Listeners:</span>
+                    <span class="calc-slider-value" id="val-listeners">50</span>
+                  </div>
+                  <input type="range" class="custom-range" min="5" max="500" step="5" value="50" id="slider-listeners" oninput="calculateCost()">
+                </div>
+
+              </div>
+
+              <!-- Total Price Breakdown Card -->
+              <div class="cost-comparison-card">
+                <div>
+                  <div style="font-size: 0.85rem; text-transform: uppercase; font-weight: 700; color: var(--accent-teal); letter-spacing: 1px;">
+                    Recommended Tier 0 Architecture
+                  </div>
+                  <div class="price-display-huge">
+                    $0.00 <span class="price-unit">/ month</span>
+                  </div>
+                  <p style="font-size: 0.875rem; color: var(--text-secondary);">
+                    Uses Web Speech API + Gemini 2.0 Flash Free Tier + Browser Web Speech Synthesis. Completely free for unlimited congregants!
+                  </p>
+
+                  <ul class="breakdown-list">
+                    <li class="breakdown-item">
+                      <span class="breakdown-label">Speech Recognition (Browser Native / Whisper Free)</span>
+                      <span class="breakdown-cost">$0.00</span>
+                    </li>
+                    <li class="breakdown-item">
+                      <span class="breakdown-label">Translation API (Gemini Free 1M Tokens/Day)</span>
+                      <span class="breakdown-cost">$0.00</span>
+                    </li>
+                    <li class="breakdown-item">
+                      <span class="breakdown-label">Live Data Stream (Firebase Spark Free Tier)</span>
+                      <span class="breakdown-cost">$0.00</span>
+                    </li>
+                    <li class="breakdown-item">
+                      <span class="breakdown-label">Hosting (Vercel / Cloudflare Pages)</span>
+                      <span class="breakdown-cost">$0.00</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                  <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-secondary);">
+                    <span>Tier 1 Paid Cloud AI Fallback Cost:</span>
+                    <span style="color: var(--primary-light); font-weight: 700;" id="calc-tier1-total">$0.18 / mo</span>
+                  </div>
+                </div>
+
+              </div>
+
             </div>
           </div>
 
