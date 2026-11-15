@@ -1,0 +1,9 @@
+{
+  "name": "sermon-translator",
+  "version": "1.0.0",
+  "description": "Real-time sermon transcription, translation, and audio synthesis web app.",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  }
+}

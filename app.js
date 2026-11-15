@@ -7,7 +7,7 @@ if (typeof window === 'undefined' && typeof require === 'function') {
   const path = require('path');
   const { exec } = require('child_process');
 
-  const PORT = Number(process.env.PORT) || 8080;
+  const PORT = Number(process.env.PORT) || 3456;
   const ROOT = __dirname;
   const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -73,6 +73,7 @@ if (typeof window === 'undefined' && typeof require === 'function') {
           }
         });
       });
+      checkReq.setTimeout(500, () => checkReq.destroy());
       checkReq.on('error', () => {
         if (currentPort < maxPort) {
           currentPort += 1;
@@ -103,7 +104,7 @@ let microphoneStream = null;
 let animationFrameId = null;
 
 let isTTSAudioActive = true;
-let isAudienceMuted = false;
+let isAudienceMuted = true;
 let audienceVolume = 1.0;
 let currentActiveView = 'speaker';
 let currentFontSize = 1.35; // rem
@@ -245,6 +246,8 @@ if (typeof document !== 'undefined') {
         }
       }
     } catch (err) {}
+    updateAudienceMuteUI();
+    loadTranslationContext();
 
     // Hydrate Audience View with recent translations if opening or navigating to Audience View
     try {
@@ -481,11 +484,65 @@ function applyTheologicalGlossary(text) {
 
 const DEFAULT_TRANSLATION_PROMPT = 'You are an expert theological sermon translator. Preserve biblical names, scripture citations, and homiletic dignity. Return ONLY the translated sentence.';
 
+function getTranslationContextFields() {
+  return {
+    topic: document.getElementById('sermon-topic-input'),
+    terms: document.getElementById('sermon-terms-input'),
+    context: document.getElementById('sermon-context-input'),
+    prompt: document.getElementById('translation-prompt-input')
+  };
+}
+
+function onTranslationContextChange() {
+  translationCache.clear();
+  const f = getTranslationContextFields();
+  try {
+    localStorage.setItem('sermon_prompt_context', JSON.stringify({
+      topic: f.topic ? f.topic.value : '',
+      terms: f.terms ? f.terms.value : '',
+      context: f.context ? f.context.value : '',
+      prompt: f.prompt ? f.prompt.value : DEFAULT_TRANSLATION_PROMPT
+    }));
+  } catch (e) {}
+}
+
+function loadTranslationContext() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('sermon_prompt_context') || 'null');
+    if (!saved) return;
+    const f = getTranslationContextFields();
+    if (f.topic && typeof saved.topic === 'string') f.topic.value = saved.topic;
+    if (f.terms && typeof saved.terms === 'string') f.terms.value = saved.terms;
+    if (f.context && typeof saved.context === 'string') f.context.value = saved.context;
+    if (f.prompt && typeof saved.prompt === 'string' && saved.prompt.trim()) f.prompt.value = saved.prompt;
+  } catch (e) {}
+}
+
+function buildTranslationSystemPrompt(targetLangName, targetLang) {
+  const f = getTranslationContextFields();
+  const basePrompt = (f.prompt && f.prompt.value.trim()) || DEFAULT_TRANSLATION_PROMPT;
+  const parts = [basePrompt];
+
+  const topic = f.topic ? f.topic.value.trim() : '';
+  const terms = f.terms ? f.terms.value.trim() : '';
+  const context = f.context ? f.context.value.trim() : '';
+
+  if (topic) parts.push(`Sermon Topic / Series: ${topic}`);
+  if (terms) parts.push(`Key Terms & Preferred Translations/Names: ${terms}`);
+  if (context) parts.push(`Additional Sermon & Scripture Context: ${context}`);
+
+  parts.push(`Target language: ${targetLangName} (${targetLang}). Output ONLY the translated text with no quotes, no preamble, and no notes.`);
+  return parts.join('\n');
+}
+
 function resetTranslationPrompt() {
-  const promptInput = document.getElementById('translation-prompt-input');
-  if (promptInput) {
-    promptInput.value = DEFAULT_TRANSLATION_PROMPT;
-  }
+  const f = getTranslationContextFields();
+  if (f.topic) f.topic.value = '';
+  if (f.terms) f.terms.value = '';
+  if (f.context) f.context.value = '';
+  if (f.prompt) f.prompt.value = DEFAULT_TRANSLATION_PROMPT;
+  translationCache.clear();
+  try { localStorage.removeItem('sermon_prompt_context'); } catch (e) {}
 }
 
 /* AI Translation Engine & Model Selection */
@@ -872,8 +929,7 @@ async function translateTextWithAI(text, targetLang, model) {
 
   // 1. Live Gemini REST API Integration (parallel speed-first race: Gemini 3.6 Flash + 3.5 Flash-Lite, no cost constraint)
   if (activeModel === 'gemini-flash' && geminiKey) {
-    const customPromptEl = document.getElementById('translation-prompt-input');
-    const systemInstructions = (customPromptEl && customPromptEl.value.trim()) || DEFAULT_TRANSLATION_PROMPT;
+    const fullSystemPrompt = buildTranslationSystemPrompt(targetLangName, targetLang);
     const translationModels = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
 
     const callGeminiModel = async (modelName) => {
@@ -884,7 +940,7 @@ async function translateTextWithAI(text, targetLang, model) {
         body: JSON.stringify({
           systemInstruction: {
             parts: [{
-              text: `${systemInstructions}\nTarget language: ${targetLangName} (${targetLang}). Output ONLY the translated text with no quotes, no preamble, and no notes.`
+              text: fullSystemPrompt
             }]
           },
           contents: [{
@@ -953,7 +1009,7 @@ async function translateTextWithAI(text, targetLang, model) {
           temperature: 0.1,
           max_tokens: 160,
           messages: [
-            { role: 'system', content: `Translate the sermon text into ${targetLangName}. Return ONLY the translation.` },
+            { role: 'system', content: buildTranslationSystemPrompt(targetLangName, targetLang) },
             { role: 'user', content: cleanText }
           ]
         })
@@ -1121,7 +1177,7 @@ function updateAudienceMuteUI() {
   const btn = document.getElementById('btn-audience-mute');
   if (!btn) return;
   if (isAudienceMuted) {
-    btn.innerText = '🔇 Muted (Read Only)';
+    btn.innerText = '🔇 Audio: OFF';
     btn.setAttribute('aria-pressed', 'true');
     btn.style.background = 'rgba(239, 68, 68, 0.18)';
     btn.style.borderColor = 'rgba(239, 68, 68, 0.45)';
@@ -1547,10 +1603,15 @@ function speakBrowserNativeTTS(text, targetLang, startTime = null) {
 
     const personaTuning = {
       Kore: { pitch: 1.0, rate: 0.96 },
-      Charon: { pitch: 0.85, rate: 0.92 },
-      Puck: { pitch: 1.08, rate: 1.02 },
       Aoede: { pitch: 1.04, rate: 0.98 },
-      Fenrir: { pitch: 0.9, rate: 1.0 }
+      Charon: { pitch: 0.85, rate: 0.92 },
+      Orus: { pitch: 0.9, rate: 0.95 },
+      Alnilam: { pitch: 0.86, rate: 0.95 },
+      Iapetus: { pitch: 0.92, rate: 0.98 },
+      Umbriel: { pitch: 0.88, rate: 0.94 },
+      Enceladus: { pitch: 0.94, rate: 0.94 },
+      Puck: { pitch: 1.02, rate: 1.0 },
+      Fenrir: { pitch: 0.88, rate: 1.0 }
     };
     const tuning = personaTuning[voicePersona] || { pitch: 1.0, rate: 1.0 };
     utterance.pitch = tuning.pitch;
